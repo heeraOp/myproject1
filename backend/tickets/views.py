@@ -8,7 +8,8 @@ from rest_framework.views import APIView
 from games.models import Game
 
 from .models import Ticket
-from .serializers import AdminTicketBookingSerializer
+from .serializers import AdminBulkTicketGenerateSerializer, AdminTicketBookingSerializer
+from .utils.generator import generate_housie_ticket
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -62,3 +63,45 @@ class AdminTicketBookingView(APIView):
                 "booked_at": ticket.booked_at,
             }
         )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AdminBulkTicketGenerateView(APIView):
+    authentication_classes = []
+
+    def post(self, request):
+        serializer = AdminBulkTicketGenerateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+
+        game_id = serializer.validated_data["game_id"]
+        total_tickets = serializer.validated_data["total_tickets"]
+
+        with transaction.atomic():
+            try:
+                game = Game.objects.select_for_update().get(id=game_id)
+            except Game.DoesNotExist:
+                return Response({"detail": "Game not found."}, status=404)
+
+            if game.status not in (Game.Status.CREATED, Game.Status.BOOKING_OPEN):
+                return Response({"detail": "Tickets can only be generated before or during booking."}, status=400)
+
+            if Ticket.objects.filter(game=game).exists():
+                return Response({"detail": "Tickets already exist for this game."}, status=400)
+
+            tickets = []
+            for ticket_number in range(1, total_tickets + 1):
+                ticket_data = generate_housie_ticket()
+                tickets.append(
+                    Ticket(
+                        game=game,
+                        ticket_number=ticket_number,
+                        ticket_type=Ticket.TicketType.RANDOM,
+                        ticket_data=ticket_data,
+                        status=Ticket.Status.OPEN,
+                    )
+                )
+
+            Ticket.objects.bulk_create(tickets)
+
+        return Response({"total_generated": total_tickets})
