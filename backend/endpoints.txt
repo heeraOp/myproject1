@@ -1,0 +1,25 @@
+#####
+POST http://127.0.0.1:8000/api/users/login/
+
+{
+  "username": "admin",
+  "password": "yourpassword"
+}
+####
+http://127.0.0.1:8000/api/users/register/
+
+{
+  "username": "agent1",
+  "password": "heeramani",
+  "email": "agent1@test.com",
+  "role": "AGENT"
+}
+
+#####
+POST /api/tickets/admin/book/
+{
+  "game_id": "uuid-of-game",
+  "ticket_number": 12,
+  "player_name": "Rahul",
+  "player_phone": "9876543210"
+}
