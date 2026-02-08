@@ -9,15 +9,6 @@ class GameConsumer(AsyncWebsocketConsumer):
         self.group_name = f"game_{self.game_id}"
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
-        await self.send(
-            text_data=json.dumps(
-                {
-                    "type": "debug.connected",
-                    "game_id": str(self.game_id),
-                    "group": self.group_name,
-                }
-            )
-        )
 
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(self.group_name, self.channel_name)

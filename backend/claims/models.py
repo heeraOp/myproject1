@@ -24,6 +24,7 @@ class Prize(models.Model):
     game = models.ForeignKey(Game, on_delete=models.CASCADE, related_name="prizes")
     prize_type = models.CharField(max_length=20, choices=PrizeType.choices)
     amount = models.PositiveIntegerField()
+    enabled = models.BooleanField(default=True)
     is_claimed = models.BooleanField(default=False)
 
     def __str__(self) -> str:

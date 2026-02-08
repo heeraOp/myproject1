@@ -5,6 +5,7 @@ from django.db import transaction
 from tickets.models import Ticket
 
 from claims.models import Claim, Winner
+from claims.serializers import WinnerSerializer
 from . import validators
 
 
@@ -98,7 +99,7 @@ def evaluate_claims_for_game(game):
     # Use a transaction to keep prize claims consistent.
     with transaction.atomic():
         # Fetch all unclaimed prizes.
-        prizes = list(game.prizes.filter(is_claimed=False))
+        prizes = list(game.prizes.filter(is_claimed=False, enabled=True))
 
         for prize in prizes:
             winning_ticket = check_prize_condition(prize.prize_type, game)
@@ -124,12 +125,7 @@ def evaluate_claims_for_game(game):
             prize.save(update_fields=["is_claimed"])
             Claim.objects.create(game=game, prize=prize, ticket=winning_ticket)
 
-            winner_payload = {
-                "prize": prize.prize_type,
-                "user_id": winner.user_id,
-                "username": winner.username,
-                "ticket_id": str(winning_ticket.id),
-            }
+            winner_payload = WinnerSerializer(winner).data
 
             async_to_sync(channel_layer.group_send)(
                 f"game_{str(game.id)}",
