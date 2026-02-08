@@ -21,3 +21,11 @@ class AdminBulkTicketGenerateSerializer(serializers.Serializer):
         if value < 1 or value > 1000:
             raise serializers.ValidationError("total_tickets must be between 1 and 1000.")
         return value
+
+
+class PlayerTicketSerializer(serializers.Serializer):
+    ticket_number = serializers.IntegerField(read_only=True)
+    ticket_type = serializers.CharField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    ticket_data = serializers.JSONField(read_only=True)
+    player_name = serializers.CharField(read_only=True)

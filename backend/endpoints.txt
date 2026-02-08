@@ -23,3 +23,16 @@ POST /api/tickets/admin/book/
   "player_name": "Rahul",
   "player_phone": "9876543210"
 }
+
+#######
+POST /api/tickets/admin/generate/
+{
+  "game_id": "uuid-of-game",
+  "total_tickets": 600
+}
+
+####### load generated ticket for a game 
+by game:(get)http://127.0.0.1:8000/api/tickets/game/<game_id>/
+
+by ticket:(get) /api/tickets/game/<game_id>/12/ticketno(1....)
+

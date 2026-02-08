@@ -8,7 +8,11 @@ from rest_framework.views import APIView
 from games.models import Game
 
 from .models import Ticket
-from .serializers import AdminBulkTicketGenerateSerializer, AdminTicketBookingSerializer
+from .serializers import (
+    AdminBulkTicketGenerateSerializer,
+    AdminTicketBookingSerializer,
+    PlayerTicketSerializer,
+)
 from .utils.generator import generate_housie_ticket
 
 
@@ -105,3 +109,30 @@ class AdminBulkTicketGenerateView(APIView):
             Ticket.objects.bulk_create(tickets)
 
         return Response({"total_generated": total_tickets})
+
+
+class PlayerTicketListView(APIView):
+    authentication_classes = []
+
+    def get(self, request, game_id):
+        try:
+            game = Game.objects.get(id=game_id)
+        except Game.DoesNotExist:
+            return Response({"detail": "Game not found."}, status=404)
+
+        tickets = Ticket.objects.filter(game=game).order_by("ticket_number")
+        serializer = PlayerTicketSerializer(tickets, many=True)
+        return Response(serializer.data)
+
+
+class PlayerTicketDetailView(APIView):
+    authentication_classes = []
+
+    def get(self, request, game_id, ticket_number):
+        try:
+            ticket = Ticket.objects.get(game_id=game_id, ticket_number=ticket_number)
+        except Ticket.DoesNotExist:
+            return Response({"detail": "Ticket not found."}, status=404)
+
+        serializer = PlayerTicketSerializer(ticket)
+        return Response(serializer.data)

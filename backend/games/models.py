@@ -22,6 +22,7 @@ class Game(models.Model):
     ticket_price = models.PositiveIntegerField()
     total_ticket_limit = models.PositiveIntegerField()
     booking_status = models.CharField(max_length=10, choices=BookingStatus.choices)
+    calling_interval = models.PositiveIntegerField(default=10)
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
 
