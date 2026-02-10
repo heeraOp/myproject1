@@ -12,12 +12,14 @@ from .views import (
     GameBusinessSummaryView,
     GameStateView,
     GameSummaryView,
+    LatestPublicGameView,
     PublicGameListView,
 )
 
 urlpatterns = [
     path("", AdminGameListCreateView.as_view(), name="admin-game-list-create"),
     path("public/", PublicGameListView.as_view(), name="public-game-list"),
+    path("public/latest/", LatestPublicGameView.as_view(), name="public-game-latest"),
     path("<uuid:game_id>/state/", GameStateView.as_view(), name="game-state"),
     path("<uuid:game_id>/summary/", GameSummaryView.as_view(), name="game-summary"),
     path("<uuid:game_id>/business-summary/", GameBusinessSummaryView.as_view(), name="game-business-summary"),

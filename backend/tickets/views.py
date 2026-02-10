@@ -6,6 +6,8 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 
 from games.models import Game
 
@@ -89,17 +91,25 @@ class AdminTicketBookingView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=400)
 
-        game_id = serializer.validated_data["game_id"]
+        game_id = serializer.validated_data.get("game_id")
         ticket_number = serializer.validated_data.get("ticket_number")
         ticket_numbers = serializer.validated_data.get("ticket_numbers") or []
         booking_mode = serializer.validated_data.get("booking_mode", "RANDOM")
         player_name = serializer.validated_data["player_name"]
         player_phone = serializer.validated_data["player_phone"]
 
-        try:
-            game = Game.objects.get(id=game_id)
-        except Game.DoesNotExist:
-            return Response({"detail": "Game not found."}, status=404)
+        if game_id:
+            try:
+                game = Game.objects.get(id=game_id)
+            except Game.DoesNotExist:
+                return Response({"detail": "Game not found."}, status=404)
+        else:
+            # Fallback to the most recent game that is open for booking.
+            game = Game.objects.filter(booking_status=Game.BookingStatus.OPEN).order_by(
+                "-game_datetime", "id"
+            ).first()
+            if game is None:
+                return Response({"detail": "No booking-open game found."}, status=404)
 
         if game.booking_status != Game.BookingStatus.OPEN:
             return Response({"detail": "Ticket booking is closed for this game."}, status=400)
@@ -134,6 +144,8 @@ class AdminTicketBookingView(APIView):
                     booking_mode=booking_mode,
                     required_count=required_count,
                 )
+            if not selected_numbers:
+                return Response({"detail": "No tickets available for booking."}, status=400)
 
             if len(open_numbers) < required_count:
                 return Response({"detail": "Not enough open tickets available."}, status=400)
@@ -167,6 +179,18 @@ class AdminTicketBookingView(APIView):
                 ticket.booked_at = now
                 ticket.ticket_type = booking_ticket_type
                 ticket.save()
+
+            booked_numbers = [ticket.ticket_number for ticket in tickets]
+
+        # Notify listeners using the existing game websocket group (no personal data).
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"game_{str(game.id)}",
+            {
+                "type": "ticket_booked",
+                "ticket_numbers": booked_numbers,
+            },
+        )
 
         booked_payloads = [
             {
@@ -256,6 +280,25 @@ class PublicTicketListView(APIView):
 
         tickets = Ticket.objects.filter(game=game).order_by("ticket_number")
         # Only mark ownership for the requesting player; never expose others.
+        viewer_phone = request.query_params.get("player_phone")
+        serializer = PublicTicketSerializer(
+            tickets,
+            many=True,
+            context={"viewer_phone": viewer_phone},
+        )
+        return Response(serializer.data)
+
+
+class PublicLatestTicketListView(APIView):
+    authentication_classes = []
+
+    def get(self, request):
+        # Public side must only see tickets for the latest created game.
+        game = Game.objects.order_by("-created_at", "-id").first()
+        if game is None:
+            return Response({"detail": "Game not found."}, status=404)
+
+        tickets = Ticket.objects.filter(game=game).order_by("ticket_number")
         viewer_phone = request.query_params.get("player_phone")
         serializer = PublicTicketSerializer(
             tickets,

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
-import { fetchPublicGames } from '@/api/rest/games'
-import { fetchGameTickets } from '@/api/rest/tickets'
+import { fetchLatestPublicGame } from '@/api/rest/games'
+import { fetchLatestGameTickets } from '@/api/rest/tickets'
+import { socketManager } from '@/api/websocket/socketManager'
 import type { PublicGame } from '@/types/backend/game'
 import type { PlayerTicket } from '@/types/backend/ticket'
 import './Lobby.css'
@@ -42,25 +43,22 @@ const Lobby = () => {
         setLoading(true)
         setError(null)
 
-        const publicGames = await fetchPublicGames()
+        const latestGame = await fetchLatestPublicGame()
         if (!mounted) return
 
-        setGames(publicGames)
-        if (publicGames.length === 0) {
+        if (!latestGame) {
+          setGames([])
           setSelectedGame(null)
           setTickets([])
           return
         }
 
-        const gameIdFromQuery = searchParams.get('gameId')
-        const foundGame = gameIdFromQuery
-          ? publicGames.find((game) => game.id === gameIdFromQuery)
-          : null
-        const runningGame = publicGames.find((game) => game.status === 'RUNNING')
-        const game = foundGame ?? runningGame ?? publicGames[0]
+        // Public side should only ever see the latest game.
+        const game = latestGame
+        setGames([latestGame])
         setSelectedGame(game)
 
-        const gameTickets = await fetchGameTickets(game.id, playerPhone)
+        const gameTickets = await fetchLatestGameTickets(playerPhone)
         if (!mounted) return
         setTickets(gameTickets)
       } catch {
@@ -80,11 +78,39 @@ const Lobby = () => {
   }, [searchParams])
 
   useEffect(() => {
+    if (!selectedGame?.id) return
+    // Connect to the game websocket to refresh tickets on bookings.
+    socketManager.connect(selectedGame.id)
+    const unsubscribe = socketManager.subscribe('ticket.booked', async (event: unknown) => {
+      // Update local tickets immediately so UI doesn't stay stale if refresh fails.
+      const payload = event as { ticket_numbers?: number[] }
+      if (Array.isArray(payload?.ticket_numbers) && payload.ticket_numbers.length > 0) {
+        const bookedSet = new Set(payload.ticket_numbers)
+        setTickets((prev) =>
+          prev.map((ticket) =>
+            bookedSet.has(ticket.ticket_number) ? { ...ticket, status: 'BOOKED' } : ticket,
+          ),
+        )
+      }
+      try {
+        const latestTickets = await fetchLatestGameTickets(playerPhone)
+        setTickets(latestTickets)
+      } catch {
+        // Keep existing tickets on refresh failure.
+      }
+    })
+    return () => {
+      unsubscribe()
+      socketManager.disconnect()
+    }
+  }, [playerPhone, selectedGame?.id])
+
+  useEffect(() => {
     let mounted = true
     const loadTickets = async () => {
       if (!selectedGame?.id) return
       try {
-        const gameTickets = await fetchGameTickets(selectedGame.id, playerPhone)
+        const gameTickets = await fetchLatestGameTickets(playerPhone)
         if (!mounted) return
         setTickets(gameTickets)
       } catch {

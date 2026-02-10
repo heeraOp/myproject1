@@ -11,3 +11,11 @@ export const fetchGameTickets = async (
   })
   return response.data
 }
+
+export const fetchLatestGameTickets = async (playerPhone?: string): Promise<PlayerTicket[]> => {
+  // Public side must only see tickets for the latest game.
+  const response = await apiClient.get<PlayerTicket[]>('/tickets/public/latest/', {
+    params: playerPhone ? { player_phone: playerPhone } : undefined,
+  })
+  return response.data
+}

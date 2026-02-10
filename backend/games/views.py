@@ -435,6 +435,18 @@ class PublicGameListView(APIView):
         return Response(serializer.data)
 
 
+class LatestPublicGameView(APIView):
+    authentication_classes = []
+
+    def get(self, request):
+        # Public side must only see the latest created game.
+        game = Game.objects.order_by("-created_at", "-id").first()
+        if game is None:
+            return Response({"detail": "No games found."}, status=404)
+        serializer = PublicGameSerializer(game)
+        return Response(serializer.data)
+
+
 class GameStateView(APIView):
     authentication_classes = []
 

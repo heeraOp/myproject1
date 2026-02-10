@@ -12,7 +12,12 @@ const TambolaTicketCard = ({ ticket }: TambolaTicketCardProps) => {
       ? ticket.player_name
       : 'booked'
     : 'open'
-  const statusLabel = isBooked ? 'BOOKED' : 'OPEN'
+  // Append player name to BOOKED status without changing layout.
+  const statusLabel = isBooked
+    ? ticket.player_name && ticket.player_name.trim().length > 0
+      ? `BOOKED : ${ticket.player_name}`
+      : 'BOOKED'
+    : 'OPEN'
 
   return (
     <article className="ticket-card">

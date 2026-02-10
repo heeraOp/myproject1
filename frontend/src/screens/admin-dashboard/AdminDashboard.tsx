@@ -28,7 +28,9 @@ import { useBingoCaller } from '@/app/hooks/useBingoCaller'
 import { useGameStore } from '@/app/store/game.store'
 import { useVoiceModeStore, type VoiceMode } from '@/app/store/voiceMode.store'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
+import { socketManager } from '@/api/websocket/socketManager'
 import type { PublicGame } from '@/types/backend/game'
+import { jsPDF } from 'jspdf'
 import './AdminDashboard.css'
 
 type SettingsForm = {
@@ -46,6 +48,24 @@ type BookingForm = {
   playerName: string
   playerPhone: string
 }
+
+// Frontend-only default dividends (no backend dependency).
+const DEFAULT_DIVIDENDS: PrizeResponse[] = [
+  { prize_type: 'FIRST_HOUSE', amount: 0, enabled: true, claimed: false },
+  { prize_type: 'SECOND_HOUSE', amount: 0, enabled: true, claimed: false },
+  { prize_type: 'THIRD_HOUSE', amount: 0, enabled: true, claimed: false },
+  { prize_type: 'FULL_SHEET', amount: 0, enabled: true, claimed: false },
+  { prize_type: 'HALF_SHEET', amount: 0, enabled: true, claimed: false },
+  { prize_type: 'TOP_LINE', amount: 0, enabled: true, claimed: false },
+  { prize_type: 'MIDDLE_LINE', amount: 0, enabled: true, claimed: false },
+  { prize_type: 'BOTTOM_LINE', amount: 0, enabled: true, claimed: false },
+  { prize_type: 'BOX', amount: 0, enabled: true, claimed: false },
+  { prize_type: 'CORNER', amount: 0, enabled: true, claimed: false },
+  { prize_type: 'STAR', amount: 0, enabled: true, claimed: false },
+  { prize_type: 'EARLY_5', amount: 0, enabled: true, claimed: false },
+  { prize_type: 'QUICK_6', amount: 0, enabled: true, claimed: false },
+  { prize_type: 'QUICK_7', amount: 0, enabled: true, claimed: false },
+]
 
 const CLAIM_MONITOR_ORDER = [
   { prizeType: 'FIRST_HOUSE', label: 'First Full House' },
@@ -128,8 +148,8 @@ const AdminDashboard = () => {
   const [gameId, setGameId] = useState<string>('')
   const [summary, setSummary] = useState<GameSummaryResponse | null>(null)
   const [business, setBusiness] = useState<GameBusinessSummaryResponse | null>(null)
-  const [prizes, setPrizes] = useState<PrizeResponse[]>([])
-  const [editablePrizes, setEditablePrizes] = useState<PrizeResponse[]>([])
+  const [prizes, setPrizes] = useState<PrizeResponse[]>(DEFAULT_DIVIDENDS)
+  const [editablePrizes, setEditablePrizes] = useState<PrizeResponse[]>(DEFAULT_DIVIDENDS)
   const [tickets, setTickets] = useState<TicketResponse[]>([])
   const [winners, setWinners] = useState<WinnerResponse[]>([])
   const [loading, setLoading] = useState(false)
@@ -171,8 +191,13 @@ const AdminDashboard = () => {
     reset: resetLiveState,
   } = useGameStore((state) => state)
   const isSetupMode = searchParams.get('setup') === '1'
-  const { announcement: bingoAnnouncement, isAudioReady, isSpeechSupported, unlockAudio } =
-    useBingoCaller()
+  const {
+    announcement: bingoAnnouncement,
+    isAudioReady,
+    isSpeechSupported,
+    audioBlockedMessage,
+    unlockAudio,
+  } = useBingoCaller()
   const voiceMode = useVoiceModeStore((state) => state.mode)
   const setVoiceMode = useVoiceModeStore((state) => state.setMode)
   const normalizedPath = location.pathname.replace(/\/+$/, '')
@@ -228,8 +253,11 @@ const AdminDashboard = () => {
         ])
 
         setBusiness(businessData)
-        setPrizes(prizesData)
-        setEditablePrizes(prizesData)
+        // Only apply backend prize data when it exists; otherwise keep defaults.
+        if (Array.isArray(prizesData) && prizesData.length > 0) {
+          setPrizes(prizesData)
+          setEditablePrizes(prizesData)
+        }
         setTickets(ticketsData)
         setWinners(winnersData)
 
@@ -285,6 +313,22 @@ const AdminDashboard = () => {
     if (!gameId) return
     void loadAll(gameId)
   }, [gameId, loadAll])
+
+  useEffect(() => {
+    if (!gameId) return
+    // Sync ticket list when bookings happen from another session/device.
+    const unsubscribe = socketManager.subscribe('ticket.booked', async () => {
+      try {
+        const freshTickets = await getTickets(gameId)
+        setTickets(freshTickets)
+      } catch {
+        // Ignore refresh failures; next manual action will refresh.
+      }
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [gameId])
 
   const mergedWinners = useMemo(() => {
     const seen = new Set<string>()
@@ -346,6 +390,29 @@ const AdminDashboard = () => {
     })
   }, [lockedPrizeTypes, mergedWinners, prizes])
 
+  const mergeBookedTickets = useCallback((bookedTickets: TicketResponse[]) => {
+    if (!bookedTickets.length) return
+    // Merge updates locally so the UI stays fresh even if a refresh call fails.
+    setTickets((prev) => {
+      if (!prev.length) return prev
+      const bookedMap = new Map(bookedTickets.map((ticket) => [ticket.ticket_number, ticket]))
+      let changed = false
+      const next = prev.map((ticket) => {
+        const booked = bookedMap.get(ticket.ticket_number)
+        if (!booked) return ticket
+        changed = true
+        return { ...ticket, ...booked, status: 'BOOKED' }
+      })
+      bookedTickets.forEach((ticket) => {
+        if (!prev.some((item) => item.ticket_number === ticket.ticket_number)) {
+          next.push(ticket)
+          changed = true
+        }
+      })
+      return changed ? next : prev
+    })
+  }, [])
+
   const handleSettingsSave = async () => {
     setSavingSettings(true)
     setActionMessage('')
@@ -398,6 +465,62 @@ const AdminDashboard = () => {
     }
   }
 
+  const generatePosterPdf = () => {
+    // Poster-only logic: build a PDF from existing dividend state (no API calls).
+    const enabledPrizes = editablePrizes.filter((prize) => prize.enabled)
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
+    const margin = 48
+    let y = margin
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(22)
+    doc.text('Tambola Prize List', margin, y)
+    y += 22
+
+    const drawDate = formatDateTime(games.find((item) => item.id === gameId)?.date)
+    if (drawDate !== '-') {
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(12)
+      doc.text(`Draw: ${drawDate}`, margin, y)
+      y += 16
+    }
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(12)
+    y += 8
+    doc.text('Prize Type', margin, y)
+    doc.text('Amount', pageWidth - margin, y, { align: 'right' })
+    y += 8
+    doc.setLineWidth(0.6)
+    doc.line(margin, y, pageWidth - margin, y)
+    y += 14
+
+    doc.setFont('helvetica', 'normal')
+    enabledPrizes.forEach((prize) => {
+      if (y > pageHeight - margin - 24) {
+        doc.addPage()
+        y = margin
+      }
+      const label = PRIZE_LABEL_MAP[prize.prize_type] ?? prize.prize_type
+      doc.text(label, margin, y)
+      doc.text(String(prize.amount), pageWidth - margin, y, { align: 'right' })
+      y += 18
+    })
+
+    doc.setFont('helvetica', 'italic')
+    doc.setFontSize(11)
+    doc.text('Good Luck & Happy Playing', margin, pageHeight - margin)
+
+    doc.save('tambola-prize-list.pdf')
+  }
+
+  const handleMakePoster = () => {
+    // Click handler for poster generation (frontend-only).
+    generatePosterPdf()
+  }
+
   const handleRunControl = async () => {
     if (!gameId || !summary) return
     setActionMessage('')
@@ -422,6 +545,12 @@ const AdminDashboard = () => {
     setBookingTicket(true)
     setActionMessage('')
     try {
+      if (!bookingForm.playerName.trim()) {
+        throw new Error('Player name is required.')
+      }
+      if (!bookingForm.playerPhone.trim()) {
+        throw new Error('Player phone is required.')
+      }
       const bookingPayload: {
         game_id: string
         ticket_number?: number
@@ -443,13 +572,25 @@ const AdminDashboard = () => {
       }
 
       const bookingResult = await bookTicket(bookingPayload)
-      const [latestTickets, latestBusiness] = await Promise.all([
-        getTickets(gameId),
-        getGameBusinessSummary(gameId),
-      ])
-      setTickets(latestTickets)
+      const bookedTickets = Array.isArray(bookingResult?.booked_tickets)
+        ? (bookingResult.booked_tickets as TicketResponse[])
+        : []
+      mergeBookedTickets(bookedTickets)
+      let latestBusiness = null
+      try {
+        const [freshTickets, freshBusiness] = await Promise.all([
+          getTickets(gameId),
+          getGameBusinessSummary(gameId),
+        ])
+        setTickets(freshTickets)
+        latestBusiness = freshBusiness
+      } catch {
+        // Keep merged tickets if the refresh fails to avoid stale UI.
+      }
       setSearchKeyword('')
-      setBusiness(latestBusiness)
+      if (latestBusiness) {
+        setBusiness(latestBusiness)
+      }
       const bookedCount = Number(bookingResult?.total_booked || 1)
       setActionMessage(`${bookedCount} ticket${bookedCount === 1 ? '' : 's'} booked.`)
       setBookingForm({ ticketNumber: '', bookingMode: bookingForm.bookingMode, playerName: '', playerPhone: '' })
@@ -464,8 +605,9 @@ const AdminDashboard = () => {
     setGameId('')
     setSummary(null)
     setBusiness(null)
-    setPrizes([])
-    setEditablePrizes([])
+    // Keep default dividends on reset; do not clear to empty.
+    setPrizes(DEFAULT_DIVIDENDS)
+    setEditablePrizes(DEFAULT_DIVIDENDS)
     setTickets([])
     setWinners([])
     setError('')
@@ -766,21 +908,26 @@ const AdminDashboard = () => {
         </section>
       )}
 
-      {showPosterView && (
-        <section className="admin-card">
-          <h2>Dividend / Prize Settings</h2>
-          <div className="table-wrap">
-            <table>
-              <thead>
+      {/* Always render Dividend / Prize Settings so it never disappears behind view logic. */}
+      <section className="admin-card">
+        <h2>Dividend / Prize Settings</h2>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Prize type</th>
+                <th>Amount</th>
+                <th>Enabled</th>
+                <th>Claimed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {editablePrizes.length === 0 ? (
                 <tr>
-                  <th>Prize type</th>
-                  <th>Amount</th>
-                  <th>Enabled</th>
-                  <th>Claimed</th>
+                  <td colSpan={4}>No dividend set.</td>
                 </tr>
-              </thead>
-              <tbody>
-                {editablePrizes.map((prize) => (
+              ) : (
+                editablePrizes.map((prize) => (
                   <tr key={prize.prize_type}>
                     <td>{PRIZE_LABEL_MAP[prize.prize_type] ?? prize.prize_type}</td>
                     <td>
@@ -817,15 +964,19 @@ const AdminDashboard = () => {
                     </td>
                     <td>{prize.claimed ? 'LOCKED' : 'OPEN'}</td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <button onClick={handleSavePrizes} disabled={savingPrizes || !gameId} className="primary-btn">
-            {savingPrizes ? 'Saving...' : 'Save Dividends'}
-          </button>
-        </section>
-      )}
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <button onClick={handleSavePrizes} disabled={savingPrizes || !gameId} className="primary-btn">
+          {savingPrizes ? 'Saving...' : 'Save Dividends'}
+        </button>
+        {/* Keep poster generation visible here without changing styles or layout. */}
+        <button className="secondary-btn" onClick={handleMakePoster}>
+          Make Poster
+        </button>
+      </section>
 
       {(showRunView || showBookView) && (
         <section className="admin-card">
@@ -871,7 +1022,9 @@ const AdminDashboard = () => {
               )}
             </div>
           </div>
-          {bingoAnnouncement && <div className="bingo-call-banner">{bingoAnnouncement}</div>}
+          {(audioBlockedMessage || bingoAnnouncement) && (
+            <div className="bingo-call-banner">{audioBlockedMessage || bingoAnnouncement}</div>
+          )}
           <div className="control-grid">
             <div>Calling status</div>
             <div>{running ? 'ON' : 'OFF'}</div>
@@ -1063,7 +1216,12 @@ const AdminDashboard = () => {
                       <td>{ticket.ticket_number}</td>
                       <td>{ticket.player_name ?? '-'}</td>
                       <td>{ticket.player_phone ?? '-'}</td>
-                      <td>{ticket.status}</td>
+                    <td>
+                      {/* Append player name to BOOKED status without changing table structure. */}
+                      {ticket.status === 'BOOKED' && ticket.player_name
+                        ? `BOOKED : ${ticket.player_name}`
+                        : ticket.status}
+                    </td>
                       <td>{ticket.ticket_type}</td>
                     </tr>
                   ))}
@@ -1091,7 +1249,7 @@ const AdminDashboard = () => {
               ))}
             </ul>
           </div>
-          <button className="primary-btn" onClick={() => window.print()}>
+          <button className="primary-btn" onClick={handleMakePoster}>
             Print Poster
           </button>
         </section>

@@ -2,7 +2,8 @@ from rest_framework import serializers
 
 
 class AdminTicketBookingSerializer(serializers.Serializer):
-    game_id = serializers.UUIDField()
+    # Allow missing game_id for legacy/admin clients; view will resolve active game.
+    game_id = serializers.UUIDField(required=False, allow_null=True)
     ticket_number = serializers.IntegerField(required=False, allow_null=True)
     ticket_numbers = serializers.ListField(
         child=serializers.IntegerField(min_value=1),
@@ -70,6 +71,9 @@ class PublicTicketSerializer(serializers.Serializer):
         Only reveal ownership for the requesting player (by phone).
         Never expose other players' personal data.
         """
+        # Only expose player name for booked tickets to avoid leaking data on OPEN tickets.
+        if getattr(obj, "status", "") != "BOOKED":
+            return None
         viewer_phone = (self.context.get("viewer_phone") or "").strip()
         if viewer_phone and obj.player_phone and obj.player_phone.strip() == viewer_phone:
             return "You"

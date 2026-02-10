@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { fetchPublicGames } from '@/api/rest/games'
+import { fetchLatestPublicGame } from '@/api/rest/games'
 import {
   fetchGameBusinessSummary,
   fetchGameSummary,
@@ -44,16 +44,16 @@ const GameFinished = () => {
     let mounted = true
     const hydrateGames = async () => {
       try {
-        const publicGames = await fetchPublicGames()
+        const latestGame = await fetchLatestPublicGame()
         if (!mounted) return
-        setGames(publicGames)
-        const queryGameId = searchParams.get('gameId')
-        const matchedGame = queryGameId
-          ? publicGames.find((game) => game.id === queryGameId)
-          : null
-        const finishedGame = publicGames.find((game) => game.status === 'FINISHED')
-        const fallbackGame = matchedGame ?? finishedGame ?? publicGames[0] ?? null
-        setSelectedGameId(fallbackGame?.id ?? '')
+        if (!latestGame) {
+          setGames([])
+          setSelectedGameId('')
+          return
+        }
+        // Public side should only ever see the latest game.
+        setGames([latestGame])
+        setSelectedGameId(latestGame.id)
       } catch {
         if (!mounted) return
         setError('Unable to load games.')

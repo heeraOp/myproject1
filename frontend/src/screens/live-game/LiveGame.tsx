@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
-import { fetchPublicGames } from '@/api/rest/games'
-import { fetchGameTickets } from '@/api/rest/tickets'
+import { fetchLatestPublicGame } from '@/api/rest/games'
+import { fetchLatestGameTickets } from '@/api/rest/tickets'
 import {
   fetchGameState,
   fetchGameSummary,
@@ -12,6 +12,7 @@ import {
   type PublicPrize,
   type PublicWinner,
 } from '@/api/rest/gamePublic'
+import { socketManager } from '@/api/websocket/socketManager'
 import { useGameSocket } from '@/app/hooks/useGameSocket'
 import { useBingoCaller } from '@/app/hooks/useBingoCaller'
 import { useGameStore } from '@/app/store/game.store'
@@ -71,8 +72,13 @@ const LiveGame = () => {
     replaceFromBackendState,
     reset: resetLiveState,
   } = useGameStore((state) => state)
-  const { announcement: bingoAnnouncement, isAudioReady, isSpeechSupported, unlockAudio } =
-    useBingoCaller()
+  const {
+    announcement: bingoAnnouncement,
+    isAudioReady,
+    isSpeechSupported,
+    audioBlockedMessage,
+    unlockAudio,
+  } = useBingoCaller()
   const voiceMode = useVoiceModeStore((state) => state.mode)
   const setVoiceMode = useVoiceModeStore((state) => state.setMode)
   const latestWinnerIdRef = useRef<number | null>(null)
@@ -83,17 +89,16 @@ const LiveGame = () => {
     let mounted = true
     const hydrateGames = async () => {
       try {
-        const publicGames = await fetchPublicGames()
+        const latestGame = await fetchLatestPublicGame()
         if (!mounted) return
-        setGames(publicGames)
-
-        const queryGameId = searchParams.get('gameId')
-        const matchedGame = queryGameId
-          ? publicGames.find((game) => game.id === queryGameId)
-          : null
-        const runningGame = publicGames.find((game) => game.status === 'RUNNING')
-        const fallbackGame = matchedGame ?? runningGame ?? publicGames[0] ?? null
-        setSelectedGameId(fallbackGame?.id ?? '')
+        if (!latestGame) {
+          setGames([])
+          setSelectedGameId('')
+          return
+        }
+        // Public side should only ever see the latest game.
+        setGames([latestGame])
+        setSelectedGameId(latestGame.id)
       } catch {
         if (!mounted) return
         setError('Unable to load game list.')
@@ -114,7 +119,7 @@ const LiveGame = () => {
         fetchGameSummary(gameId),
         fetchGameState(gameId),
         fetchPrizes(gameId),
-        fetchGameTickets(gameId, playerPhone),
+        fetchLatestGameTickets(playerPhone),
         fetchWinners(gameId),
       ])
 
@@ -134,6 +139,32 @@ const LiveGame = () => {
     if (!selectedGameId) return
     void loadGameData(selectedGameId)
   }, [loadGameData, selectedGameId])
+
+  useEffect(() => {
+    if (!selectedGameId) return
+    // Listen for ticket booking updates and refresh public tickets safely.
+    const unsubscribe = socketManager.subscribe('ticket.booked', async (event: unknown) => {
+      // Update local tickets immediately so UI doesn't stay stale if refresh fails.
+      const payload = event as { ticket_numbers?: number[] }
+      if (Array.isArray(payload?.ticket_numbers) && payload.ticket_numbers.length > 0) {
+        const bookedSet = new Set(payload.ticket_numbers)
+        setTickets((prev) =>
+          prev.map((ticket) =>
+            bookedSet.has(ticket.ticket_number) ? { ...ticket, status: 'BOOKED' } : ticket,
+          ),
+        )
+      }
+      try {
+        const latestTickets = await fetchLatestGameTickets(playerPhone)
+        setTickets(latestTickets)
+      } catch {
+        // Keep existing tickets on refresh failure.
+      }
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [playerPhone, selectedGameId])
 
   useEffect(() => {
     const latestWinner = liveWinners[liveWinners.length - 1]
@@ -281,7 +312,9 @@ const LiveGame = () => {
             )}
           </div>
         </div>
-        {bingoAnnouncement && <div className="live-bingo-call">{bingoAnnouncement}</div>}
+        {(audioBlockedMessage || bingoAnnouncement) && (
+          <div className="live-bingo-call">{audioBlockedMessage || bingoAnnouncement}</div>
+        )}
       </section>
 
       {loading && <section className="live-message">Loading live game...</section>}

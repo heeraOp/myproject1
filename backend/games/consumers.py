@@ -53,3 +53,16 @@ class GameConsumer(AsyncWebsocketConsumer):
                 }
             )
         )
+
+    async def ticket_booked(self, event):
+        """
+        Ticket booking updates (no personal data). Clients can refetch tickets safely.
+        """
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "ticket.booked",
+                    "ticket_numbers": event.get("ticket_numbers", []),
+                }
+            )
+        )
