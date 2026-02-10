@@ -1,6 +1,7 @@
 export type GameStatus = 'CREATED' | 'BOOKING_OPEN' | 'RUNNING' | 'PAUSED' | 'FINISHED'
 export type BookingStatus = 'OPEN' | 'CLOSED'
 export type WebsiteStatus = 'OPEN' | 'CLOSED'
+export type ThemeName = 'dark' | 'light' | 'festival-gold' | 'festival-diwali'
 
 export type PublicGame = {
   id: string
@@ -9,4 +10,5 @@ export type PublicGame = {
   ticket_price: number
   booking_status: BookingStatus
   website_status: WebsiteStatus
+  active_theme?: ThemeName
 }

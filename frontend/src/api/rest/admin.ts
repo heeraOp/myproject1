@@ -1,4 +1,5 @@
 import { adminApiClient } from '@/api/rest/client'
+import type { ThemeName } from '@/types/backend/game'
 
 export type GameSummaryResponse = {
   game: {
@@ -10,6 +11,7 @@ export type GameSummaryResponse = {
     total_tickets: number
     ticket_price: number
     agent_commission: number
+    active_theme?: ThemeName
   }
   prizes: Array<{
     prize_type: string
@@ -117,8 +119,13 @@ export const updatePrizes = async (
   return response.data
 }
 
-export const getTickets = async (gameId: string): Promise<TicketResponse[]> => {
-  const response = await adminApiClient.get<TicketResponse[]>(`/tickets/game/${gameId}/`)
+export const getTickets = async (
+  gameId: string,
+  status?: 'OPEN' | 'BOOKED',
+): Promise<TicketResponse[]> => {
+  const response = await adminApiClient.get<TicketResponse[]>(`/tickets/game/${gameId}/`, {
+    params: status ? { status } : undefined,
+  })
   return response.data
 }
 
@@ -193,5 +200,13 @@ export const resetTicket = async (gameId: string) => {
 
 export const resetAgent = async (gameId: string) => {
   const response = await adminApiClient.post(`/games/admin/${gameId}/reset-agent/`)
+  return response.data
+}
+
+export const updateActiveTheme = async (gameId: string, activeTheme: ThemeName) => {
+  const response = await adminApiClient.post<{ active_theme: ThemeName }>(
+    `/games/admin/${gameId}/theme/`,
+    { active_theme: activeTheme },
+  )
   return response.data
 }

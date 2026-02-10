@@ -1,15 +1,15 @@
 .select-shell {
   min-height: 100vh;
   padding: 18px 16px 40px;
-  background: linear-gradient(180deg, #1730ff 0%, #0a1671 60%, #07124b 100%);
-  color: #fff;
+  background: linear-gradient(180deg, var(--color-1730ff) 0%, var(--color-0a1671) 60%, var(--color-07124b) 100%);
+  color: var(--color-fff);
 }
 
 .select-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #1427b5;
+  background: var(--color-1427b5);
   padding: 16px;
   border-radius: 8px;
   margin-bottom: 12px;
@@ -30,15 +30,15 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #0d1aa3;
+  background: var(--color-0d1aa3);
   padding: 14px;
   border-radius: 8px;
   margin-bottom: 16px;
 }
 
 .banner-button {
-  background: #ff6a45;
-  color: #fff;
+  background: var(--color-ff6a45);
+  color: var(--color-fff);
   border: none;
   border-radius: 18px;
   padding: 8px 16px;
@@ -55,7 +55,7 @@
 .input-row input {
   padding: 10px 12px;
   border-radius: 6px;
-  border: 2px solid #0a0f3f;
+  border: 2px solid var(--color-0a0f3f);
 }
 
 .ticket-types {
@@ -63,7 +63,7 @@
 }
 
 .ticket-types div {
-  border-bottom: 2px solid #7ea2ff;
+  border-bottom: 2px solid var(--color-7ea2ff);
   padding: 8px 2px;
   font-weight: 600;
 }
@@ -78,12 +78,12 @@
   flex: 1;
   padding: 10px 12px;
   border-radius: 10px;
-  border: 2px solid #9db3ff;
+  border: 2px solid var(--color-9db3ff);
 }
 
 .ticket-add button {
-  background: #fff;
-  color: #0a0f3f;
+  background: var(--color-fff);
+  color: var(--color-0a0f3f);
   border: none;
   border-radius: 12px;
   padding: 8px 16px;
@@ -93,9 +93,9 @@
 .book-now {
   width: 100%;
   padding: 12px;
-  background: #ff1f2d;
+  background: var(--color-ff1f2d);
   border: none;
-  color: #fff;
+  color: var(--color-fff);
   font-weight: 700;
   border-radius: 8px;
   margin-bottom: 14px;
@@ -105,22 +105,22 @@
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   gap: 6px;
-  background: #f0f0f0;
+  background: var(--color-f0f0f0);
   padding: 10px;
   border-radius: 8px;
 }
 
 .ticket-cell {
-  background: #fff;
-  color: #101010;
+  background: var(--color-fff);
+  color: var(--color-101010);
   text-align: center;
   padding: 8px 0;
-  border: 1px solid #c8c8c8;
+  border: 1px solid var(--color-c8c8c8);
   font-weight: 700;
 }
 
 .ticket-cell.available {
-  background: #ffe900;
+  background: var(--color-ffe900);
 }
 
 @media (max-width: 720px) {

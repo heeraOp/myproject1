@@ -19,6 +19,14 @@ import { useGameStore } from '@/app/store/game.store'
 import { useVoiceModeStore, type VoiceMode } from '@/app/store/voiceMode.store'
 import type { PublicGame } from '@/types/backend/game'
 import type { PlayerTicket } from '@/types/backend/ticket'
+import {
+  formatThemeLabel,
+  getActiveTheme,
+  isAdminThemeActive,
+  setAdminTheme,
+  subscribeThemeChange,
+  toggleTheme,
+} from '@/utils/theme'
 import './LiveGame.css'
 
 const PRIZE_LABEL_MAP: Record<string, string> = {
@@ -62,6 +70,13 @@ const LiveGame = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [winnerOverlay, setWinnerOverlay] = useState<PublicWinner | null>(null)
+  const [theme, setTheme] = useState(getActiveTheme())
+  const [isThemeLocked, setIsThemeLocked] = useState(isAdminThemeActive())
+
+  const handleThemeToggle = () => {
+    if (isThemeLocked) return
+    setTheme(toggleTheme())
+  }
 
   const {
     status: liveStatus,
@@ -79,6 +94,13 @@ const LiveGame = () => {
     audioBlockedMessage,
     unlockAudio,
   } = useBingoCaller()
+
+  useEffect(() => {
+    return subscribeThemeChange(({ theme: updatedTheme, isLocked }) => {
+      setTheme(updatedTheme)
+      setIsThemeLocked(isLocked)
+    })
+  }, [])
   const voiceMode = useVoiceModeStore((state) => state.mode)
   const setVoiceMode = useVoiceModeStore((state) => state.setMode)
   const latestWinnerIdRef = useRef<number | null>(null)
@@ -95,6 +117,9 @@ const LiveGame = () => {
           setGames([])
           setSelectedGameId('')
           return
+        }
+        if (latestGame.active_theme) {
+          setAdminTheme(latestGame.active_theme)
         }
         // Public side should only ever see the latest game.
         setGames([latestGame])
@@ -250,6 +275,14 @@ const LiveGame = () => {
             <button type="button" className="ghost-btn" onClick={() => navigate('/')}>
               Lobby
             </button>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={handleThemeToggle}
+              disabled={isThemeLocked}
+            >
+              Theme: {formatThemeLabel(theme)}
+            </button>
             {effectiveStatus === 'FINISHED' && (
               <button type="button" className="primary-btn" onClick={goToFinished}>
                 View Summary
@@ -393,7 +426,11 @@ const LiveGame = () => {
             ) : (
               <div className="live-ticket-list">
                 {tickets.map((ticket) => (
-                  <TambolaTicketCard key={ticket.ticket_number} ticket={ticket} />
+                  <TambolaTicketCard
+                    key={ticket.ticket_number}
+                    ticket={ticket}
+                    calledNumbers={calledNumbers}
+                  />
                 ))}
               </div>
             )}

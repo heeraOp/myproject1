@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     AdminCallNextNumberView,
     AdminGameListCreateView,
+    AdminGameThemeView,
     AdminPauseGameView,
     AdminResetAgentView,
     AdminResetCallView,
@@ -26,6 +27,7 @@ urlpatterns = [
     path("admin/<uuid:game_id>/start/", AdminStartGameView.as_view(), name="admin-game-start"),
     path("admin/<uuid:game_id>/pause/", AdminPauseGameView.as_view(), name="admin-game-pause"),
     path("admin/<uuid:game_id>/resume/", AdminResumeGameView.as_view(), name="admin-game-resume"),
+    path("admin/<uuid:game_id>/theme/", AdminGameThemeView.as_view(), name="admin-game-theme"),
     path("admin/<uuid:game_id>/call-next/", AdminCallNextNumberView.as_view(), name="admin-game-call-next"),
     path("admin/<uuid:game_id>/reset-call/", AdminResetCallView.as_view(), name="admin-game-reset-call"),
     path("admin/<uuid:game_id>/reset-ticket/", AdminResetTicketView.as_view(), name="admin-game-reset-ticket"),

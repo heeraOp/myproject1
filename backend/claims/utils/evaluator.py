@@ -96,16 +96,17 @@ def evaluate_claims_for_game(game):
     newly_claimed = []
     channel_layer = get_channel_layer()
 
-    # Use a transaction to keep prize claims consistent.
+    # Use a transaction + row locks to keep prize claims consistent under concurrency.
     with transaction.atomic():
-        # Fetch all unclaimed prizes.
-        prizes = list(game.prizes.filter(is_claimed=False, enabled=True))
+        # Fetch and lock all unclaimed prizes to prevent double winners.
+        prizes = list(game.prizes.select_for_update().filter(is_claimed=False, enabled=True))
 
         for prize in prizes:
             winning_ticket = check_prize_condition(prize.prize_type, game)
             if winning_ticket is None:
                 continue
 
+            # Guard against duplicate wins (idempotent).
             if Winner.objects.filter(game=game, prize__prize_type=prize.prize_type).exists():
                 continue
 

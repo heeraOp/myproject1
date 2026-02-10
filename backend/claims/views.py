@@ -131,7 +131,7 @@ class PrizeListUpdateView(APIView):
             except (TypeError, ValueError):
                 return Response({"detail": f"Invalid amount for {prize_type}"}, status=400)
 
-            enabled = bool(item.get("enabled", True))
+            enabled = bool(item.get("enabled", False))
 
             prize, _ = Prize.objects.update_or_create(
                 game=game,
@@ -153,8 +153,27 @@ class PrizeListUpdateView(APIView):
         return Response(updated)
 
 
+class PrizeTypeListView(APIView):
+    """
+    Admin-only endpoint to list all available prize types.
+    """
+
+    permission_classes = [IsAdminRole]
+
+    def get(self, request):
+        return Response(
+            [{"prize_type": choice[0], "label": choice[1]} for choice in Prize.PrizeType.choices]
+        )
+
+
 class ClaimSubmitView(APIView):
     def post(self, request):
+        # Manual claim submissions are disabled; claims are evaluated automatically.
+        return Response(
+            {"detail": "Manual claims are disabled. Claims are evaluated automatically."},
+            status=400,
+        )
+
         game_id = request.data.get("game_id")
         ticket_number = request.data.get("ticket_number")
         prize_type = request.data.get("prize_type")

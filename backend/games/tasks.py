@@ -65,6 +65,14 @@ def auto_call_numbers(game_id):
         return False
 
     try:
+        game = Game.objects.filter(id=game_id).first()
+        if game is None:
+            return
+
+        if not game.prizes.filter(enabled=True).exists():
+            # Do not auto-call numbers unless at least one prize is enabled.
+            return
+
         while True:
             game = Game.objects.filter(id=game_id).first()
             if game is None:

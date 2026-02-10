@@ -1,8 +1,8 @@
 .list-shell {
   min-height: 100vh;
   padding: 20px 16px 50px;
-  background: linear-gradient(180deg, #1b2cff 0%, #0a146e 60%, #070d43 100%);
-  color: #fff;
+  background: linear-gradient(180deg, var(--color-1b2cff) 0%, var(--color-0a146e) 60%, var(--color-070d43) 100%);
+  color: var(--color-fff);
 }
 
 .list-header {
@@ -10,7 +10,7 @@
   font-size: 30px;
   text-align: center;
   padding: 14px 10px;
-  background: #1623aa;
+  background: var(--color-1623aa);
   border-radius: 8px;
   margin-bottom: 14px;
 }
@@ -26,26 +26,26 @@
   padding: 10px;
   border-radius: 10px;
   border: none;
-  background: #050505;
-  color: #fff;
+  background: var(--color-050505);
+  color: var(--color-fff);
   font-weight: 700;
 }
 
 .tab.active {
-  background: #ff1f2d;
+  background: var(--color-ff1f2d);
 }
 
 .search-input {
   width: 100%;
   padding: 12px 14px;
   border-radius: 10px;
-  border: 2px solid #0a0f3f;
+  border: 2px solid var(--color-0a0f3f);
   margin-bottom: 14px;
 }
 
 .list-table {
-  background: #f0f2ff;
-  color: #111;
+  background: var(--color-f0f2ff);
+  color: var(--color-111);
   border-radius: 8px;
   overflow: hidden;
   box-shadow: var(--shadow);
@@ -61,14 +61,14 @@
 }
 
 .list-head {
-  background: #0b0b0b;
-  color: #fff;
+  background: var(--color-0b0b0b);
+  color: var(--color-fff);
   font-weight: 700;
 }
 
 .list-row {
-  background: #fff;
-  border-bottom: 2px solid #b1b6ff;
+  background: var(--color-fff);
+  border-bottom: 2px solid var(--color-b1b6ff);
   font-weight: 600;
 }
 
@@ -78,7 +78,7 @@
 
 .list-row .edit {
   text-align: center;
-  color: #1b43ff;
+  color: var(--color-1b43ff);
   font-weight: 800;
 }
 
@@ -88,8 +88,8 @@
   padding: 14px;
   border: none;
   border-radius: 10px;
-  background: #ff1f2d;
-  color: #fff;
+  background: var(--color-ff1f2d);
+  color: var(--color-fff);
   font-weight: 700;
 }
 

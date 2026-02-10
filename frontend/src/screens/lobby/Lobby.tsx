@@ -2,10 +2,21 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
 import { fetchLatestPublicGame } from '@/api/rest/games'
+import { fetchGameState } from '@/api/rest/gamePublic'
 import { fetchLatestGameTickets } from '@/api/rest/tickets'
 import { socketManager } from '@/api/websocket/socketManager'
+import { useGameSocket } from '@/app/hooks/useGameSocket'
+import { useGameStore } from '@/app/store/game.store'
 import type { PublicGame } from '@/types/backend/game'
 import type { PlayerTicket } from '@/types/backend/ticket'
+import {
+  formatThemeLabel,
+  getActiveTheme,
+  isAdminThemeActive,
+  setAdminTheme,
+  subscribeThemeChange,
+  toggleTheme,
+} from '@/utils/theme'
 import './Lobby.css'
 
 const formatClock = (dateValue: string): string => {
@@ -29,11 +40,30 @@ const Lobby = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now())
+  const [theme, setTheme] = useState(getActiveTheme())
+  const [isThemeLocked, setIsThemeLocked] = useState(isAdminThemeActive())
+  const calledNumbers = useGameStore((state) => state.calledNumbers)
+  const replaceFromBackendState = useGameStore((state) => state.replaceFromBackendState)
+
+  const handleThemeToggle = () => {
+    if (isThemeLocked) return
+    setTheme(toggleTheme())
+  }
+
+  useEffect(() => {
+    return subscribeThemeChange(({ theme: updatedTheme, isLocked }) => {
+      setTheme(updatedTheme)
+      setIsThemeLocked(isLocked)
+    })
+  }, [])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [])
+
+  // Keep called numbers synced via the existing game websocket feed.
+  useGameSocket(selectedGame?.id || undefined)
 
   useEffect(() => {
     let mounted = true
@@ -51,6 +81,10 @@ const Lobby = () => {
           setSelectedGame(null)
           setTickets([])
           return
+        }
+
+        if (latestGame.active_theme) {
+          setAdminTheme(latestGame.active_theme)
         }
 
         // Public side should only ever see the latest game.
@@ -79,8 +113,7 @@ const Lobby = () => {
 
   useEffect(() => {
     if (!selectedGame?.id) return
-    // Connect to the game websocket to refresh tickets on bookings.
-    socketManager.connect(selectedGame.id)
+    // Listen for booking events to keep ticket status fresh.
     const unsubscribe = socketManager.subscribe('ticket.booked', async (event: unknown) => {
       // Update local tickets immediately so UI doesn't stay stale if refresh fails.
       const payload = event as { ticket_numbers?: number[] }
@@ -101,9 +134,27 @@ const Lobby = () => {
     })
     return () => {
       unsubscribe()
-      socketManager.disconnect()
     }
   }, [playerPhone, selectedGame?.id])
+
+  useEffect(() => {
+    let mounted = true
+    const loadState = async () => {
+      if (!selectedGame?.id) return
+      try {
+        const state = await fetchGameState(selectedGame.id)
+        if (!mounted) return
+        // Seed called numbers so ticket marking is correct on refresh.
+        replaceFromBackendState(state)
+      } catch {
+        return
+      }
+    }
+    void loadState()
+    return () => {
+      mounted = false
+    }
+  }, [replaceFromBackendState, selectedGame?.id])
 
   useEffect(() => {
     let mounted = true
@@ -170,6 +221,9 @@ const Lobby = () => {
           </a>
           <button className="action-link" type="button">
             Login
+          </button>
+          <button className="action-link" type="button" onClick={handleThemeToggle} disabled={isThemeLocked}>
+            Theme: {formatThemeLabel(theme)}
           </button>
         </div>
 
@@ -244,7 +298,13 @@ const Lobby = () => {
 
         {!loading &&
           !error &&
-          tickets.map((ticket) => <TambolaTicketCard key={ticket.ticket_number} ticket={ticket} />)}
+          tickets.map((ticket) => (
+            <TambolaTicketCard
+              key={ticket.ticket_number}
+              ticket={ticket}
+              calledNumbers={calledNumbers}
+            />
+          ))}
       </section>
     </main>
   )

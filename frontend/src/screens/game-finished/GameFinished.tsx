@@ -10,6 +10,14 @@ import {
   type PublicWinner,
 } from '@/api/rest/gamePublic'
 import type { PublicGame } from '@/types/backend/game'
+import {
+  formatThemeLabel,
+  getActiveTheme,
+  isAdminThemeActive,
+  setAdminTheme,
+  subscribeThemeChange,
+  toggleTheme,
+} from '@/utils/theme'
 import './GameFinished.css'
 
 const PRIZE_LABEL_MAP: Record<string, string> = {
@@ -41,6 +49,20 @@ const GameFinished = () => {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    return subscribeThemeChange(({ theme: updatedTheme, isLocked }) => {
+      setTheme(updatedTheme)
+      setIsThemeLocked(isLocked)
+    })
+  }, [])
+  const [theme, setTheme] = useState(getActiveTheme())
+  const [isThemeLocked, setIsThemeLocked] = useState(isAdminThemeActive())
+
+  const handleThemeToggle = () => {
+    if (isThemeLocked) return
+    setTheme(toggleTheme())
+  }
+
+  useEffect(() => {
     let mounted = true
     const hydrateGames = async () => {
       try {
@@ -50,6 +72,9 @@ const GameFinished = () => {
           setGames([])
           setSelectedGameId('')
           return
+        }
+        if (latestGame.active_theme) {
+          setAdminTheme(latestGame.active_theme)
         }
         // Public side should only ever see the latest game.
         setGames([latestGame])
@@ -115,6 +140,9 @@ const GameFinished = () => {
         <div className="finished-header-actions">
           <button type="button" className="ghost-btn" onClick={() => navigate('/')}>
             Lobby
+          </button>
+          <button type="button" className="ghost-btn" onClick={handleThemeToggle} disabled={isThemeLocked}>
+            Theme: {formatThemeLabel(theme)}
           </button>
           <button type="button" className="primary-btn" onClick={() => navigate('/live')}>
             Live View

@@ -16,6 +16,7 @@ from .models import Game
 from .utils.calling import call_next_number
 from .tasks import auto_call_numbers
 from claims.models import Claim, Winner, Prize
+from claims.utils.evaluator import evaluate_claims_for_game
 from claims.serializers import WinnerSerializer
 from tickets.models import Ticket
 from tickets.utils.generator import generate_housie_ticket
@@ -207,6 +208,12 @@ class AdminStartGameView(APIView):
                     status=400,
                 )
 
+            if not Prize.objects.filter(game=game, enabled=True).exists():
+                return Response(
+                    {"detail": "Please configure at least one prize before starting the game."},
+                    status=400,
+                )
+
             game.status = Game.Status.RUNNING
             game.calling_interval = calling_interval
             game.save(update_fields=["status", "calling_interval"])
@@ -267,11 +274,38 @@ class AdminResumeGameView(APIView):
                     status=400,
                 )
 
+            if not Prize.objects.filter(game=game, enabled=True).exists():
+                return Response(
+                    {"detail": "Please configure at least one prize before resuming the game."},
+                    status=400,
+                )
+
             game.status = Game.Status.RUNNING
             game.save(update_fields=["status"])
 
         auto_call_numbers.delay(game.id)
         return Response({"detail": "Game resumed."})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AdminGameThemeView(APIView):
+    """
+    Admin-only endpoint to set the active theme for a game.
+    """
+
+    permission_classes = [IsAdminRole]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def post(self, request, game_id):
+        game = get_object_or_404(Game, id=game_id)
+        active_theme = str(request.data.get("active_theme", "")).strip()
+        if active_theme not in {choice[0] for choice in Game.Theme.choices}:
+            return Response({"detail": "Invalid active_theme."}, status=400)
+
+        game.active_theme = active_theme
+        game.save(update_fields=["active_theme"])
+
+        return Response({"active_theme": game.active_theme})
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -297,6 +331,21 @@ class AdminCallNextNumberView(APIView):
         except (ValueError, RuntimeError) as exc:
             _mark_game_finished_if_numbers_exhausted(game)
             return Response({"detail": str(exc)}, status=400)
+
+        called_numbers = list(game.called_numbers.values_list("number", flat=True))
+
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"game_{str(game.id)}",
+            {
+                "type": "number_called",
+                "number": number,
+                "called_numbers": called_numbers,
+            },
+        )
+
+        # Auto-detect winners after each call (server-authoritative).
+        evaluate_claims_for_game(game)
 
         _mark_game_finished_if_numbers_exhausted(game)
 
@@ -326,6 +375,7 @@ class AdminGameListCreateView(APIView):
                     "total_tickets": game.total_ticket_limit,
                     "ticket_price": game.ticket_price,
                     "agent_commission": game.agent_commission,
+                    "active_theme": game.active_theme,
                 }
             )
         return Response(data)
@@ -365,6 +415,10 @@ class AdminGameListCreateView(APIView):
         if website_status not in {choice[0] for choice in Game.WebsiteStatus.choices}:
             return Response({"detail": "Invalid website_status."}, status=400)
 
+        active_theme = str(request.data.get("active_theme", Game.Theme.DARK))
+        if active_theme not in {choice[0] for choice in Game.Theme.choices}:
+            return Response({"detail": "Invalid active_theme."}, status=400)
+
         if ticket_price <= 0:
             return Response({"detail": "ticket_price must be greater than 0."}, status=400)
         if total_tickets <= 0:
@@ -380,6 +434,7 @@ class AdminGameListCreateView(APIView):
             ticket_price=ticket_price,
             agent_commission=agent_commission,
             total_ticket_limit=total_tickets,
+            active_theme=active_theme,
             created_by=request.user,
         )
 
@@ -409,6 +464,7 @@ class AdminGameListCreateView(APIView):
                 "total_tickets": game.total_ticket_limit,
                 "ticket_price": game.ticket_price,
                 "agent_commission": game.agent_commission,
+                "active_theme": game.active_theme,
             },
             status=201,
         )
@@ -421,6 +477,7 @@ class PublicGameSerializer(serializers.Serializer):
     ticket_price = serializers.IntegerField(read_only=True)
     booking_status = serializers.CharField(read_only=True)
     website_status = serializers.CharField(read_only=True)
+    active_theme = serializers.CharField(read_only=True)
 
 
 class PublicGameListView(APIView):
@@ -534,6 +591,7 @@ class GameSummaryView(APIView):
             "calling_interval": game.calling_interval,
             "booking_status": game.booking_status,
             "website_status": game.website_status,
+            "active_theme": game.active_theme,
             "total_tickets": game.total_ticket_limit,
             "ticket_price": game.ticket_price,
             "agent_commission": game.agent_commission,

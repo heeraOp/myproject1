@@ -1,8 +1,8 @@
 .run-shell {
   min-height: 100vh;
-  background: linear-gradient(180deg, #1c35ff 0%, #0a1b7d 55%, #08124f 100%);
+  background: linear-gradient(180deg, var(--color-1c35ff) 0%, var(--color-0a1b7d) 55%, var(--color-08124f) 100%);
   padding: 24px 16px 40px;
-  color: #fff;
+  color: var(--color-fff);
 }
 
 .run-title {
@@ -19,8 +19,8 @@
 }
 
 .run-controls {
-  background: #c9c9c9;
-  color: #111;
+  background: var(--color-c9c9c9);
+  color: var(--color-111);
   border-radius: 6px;
   overflow: hidden;
   box-shadow: var(--shadow);
@@ -31,7 +31,7 @@
   display: grid;
   grid-template-columns: 1fr 140px;
   gap: 8px;
-  border-bottom: 2px solid #8d8d8d;
+  border-bottom: 2px solid var(--color-8d8d8d);
 }
 
 .control-row:last-child {
@@ -44,7 +44,7 @@
 }
 
 .control-value {
-  background: #fff;
+  background: var(--color-fff);
   padding: 12px;
   text-align: center;
   font-weight: 700;
@@ -54,7 +54,7 @@
   display: grid;
   grid-template-columns: repeat(10, minmax(28px, 1fr));
   gap: 4px;
-  background: #e6e6e6;
+  background: var(--color-e6e6e6);
   padding: 8px;
   border-radius: 6px;
   box-shadow: var(--shadow);
@@ -62,12 +62,12 @@
 }
 
 .number-cell {
-  background: #fff;
-  color: #111;
+  background: var(--color-fff);
+  color: var(--color-111);
   text-align: center;
   font-weight: 700;
   padding: 6px 0;
-  border: 1px solid #c0c0c0;
+  border: 1px solid var(--color-c0c0c0);
 }
 
 .prize-panel {
@@ -77,7 +77,7 @@
 
 .prize-row {
   background: var(--panel-yellow);
-  color: #101010;
+  color: var(--color-101010);
   padding: 14px 16px;
   border-radius: 6px;
   font-weight: 700;

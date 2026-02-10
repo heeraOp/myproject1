@@ -2,14 +2,14 @@
   min-height: 100vh;
   padding: 24px 18px 80px;
   background:
-    radial-gradient(circle at 12% 8%, rgba(255, 40, 40, 0.2) 0, rgba(255, 40, 40, 0) 26%),
-    radial-gradient(circle at 78% 15%, rgba(57, 95, 255, 0.3) 0, rgba(57, 95, 255, 0) 30%),
-    linear-gradient(180deg, #071141 0%, #0c1a6d 55%, #050d36 100%);
-  color: #eef1ff;
+    radial-gradient(circle at 12% 8%, var(--color-rgba-255-40-40-02) 0, var(--color-rgba-255-40-40-0) 26%),
+    radial-gradient(circle at 78% 15%, var(--color-rgba-57-95-255-03) 0, var(--color-rgba-57-95-255-0) 30%),
+    linear-gradient(180deg, var(--color-071141) 0%, var(--color-0c1a6d) 55%, var(--color-050d36) 100%);
+  color: var(--color-eef1ff);
 }
 
 .admin-page__header {
-  background: linear-gradient(180deg, #e81f2f 0%, #9b0e16 100%);
+  background: linear-gradient(180deg, var(--color-e81f2f) 0%, var(--color-9b0e16) 100%);
   border-radius: 10px;
   box-shadow: var(--shadow);
   padding: 16px 18px;
@@ -42,10 +42,10 @@
 }
 
 .admin-subnav__item {
-  border: 2px solid #ffe700;
+  border: 2px solid var(--color-ffe700);
   border-radius: 8px;
-  background: #08133c;
-  color: #fff;
+  background: var(--color-08133c);
+  color: var(--color-fff);
   padding: 10px 8px;
   font-weight: 800;
   letter-spacing: 0.7px;
@@ -54,13 +54,13 @@
 }
 
 .admin-subnav__item.active {
-  background: linear-gradient(180deg, #ff1f2d 0%, #b10d18 100%);
-  border-color: #ffd2d6;
+  background: linear-gradient(180deg, var(--color-ff1f2d) 0%, var(--color-b10d18) 100%);
+  border-color: var(--color-ffd2d6);
 }
 
 .admin-view-banner {
-  background: linear-gradient(180deg, #18267e 0%, #0c1455 100%);
-  border: 2px solid #0b1040;
+  background: linear-gradient(180deg, var(--color-18267e) 0%, var(--color-0c1455) 100%);
+  border: 2px solid var(--color-0b1040);
   border-radius: 12px;
   box-shadow: var(--shadow);
   margin-bottom: 16px;
@@ -76,36 +76,36 @@
 
 .admin-view-banner p {
   margin: 0;
-  color: #d9e0ff;
+  color: var(--color-d9e0ff);
   font-weight: 600;
 }
 
 .admin-select {
   min-width: 280px;
   max-width: 100%;
-  border: 2px solid #ffe700;
-  background: #08133c;
-  color: #fff;
+  border: 2px solid var(--color-ffe700);
+  background: var(--color-08133c);
+  color: var(--color-fff);
   border-radius: 8px;
   padding: 10px;
   font-weight: 700;
 }
 
 .admin-message {
-  background: #0b1b62;
-  border: 2px solid #ffe700;
+  background: var(--color-0b1b62);
+  border: 2px solid var(--color-ffe700);
   border-radius: 8px;
   padding: 12px;
   margin-bottom: 14px;
 }
 
 .admin-message.error {
-  border-color: #ff2d2d;
+  border-color: var(--color-ff2d2d);
 }
 
 .admin-card {
-  background: #111b71;
-  border: 2px solid #0d124a;
+  background: var(--color-111b71);
+  border: 2px solid var(--color-0d124a);
   border-radius: 12px;
   box-shadow: var(--shadow);
   margin-bottom: 18px;
@@ -131,13 +131,13 @@
 }
 
 .kv-grid > div:nth-child(odd) {
-  background: #090b1c;
+  background: var(--color-090b1c);
   font-weight: 700;
 }
 
 .kv-grid > div:nth-child(even) {
-  background: #f7f8ff;
-  color: #111;
+  background: var(--color-f7f8ff);
+  color: var(--color-111);
 }
 
 .form-grid {
@@ -155,7 +155,7 @@
 
 .form-grid input,
 .form-grid select {
-  border: 2px solid #0a0e3d;
+  border: 2px solid var(--color-0a0e3d);
   border-radius: 8px;
   padding: 10px;
   font-weight: 600;
@@ -174,14 +174,14 @@
 }
 
 .primary-btn {
-  background: linear-gradient(180deg, #ff1f2d 0%, #be101a 100%);
-  color: #fff;
+  background: linear-gradient(180deg, var(--color-ff1f2d) 0%, var(--color-be101a) 100%);
+  color: var(--color-fff);
   padding: 12px 16px;
 }
 
 .secondary-btn {
-  background: #0b0b0b;
-  color: #fff;
+  background: var(--color-0b0b0b);
+  color: var(--color-fff);
   padding: 12px 16px;
 }
 
@@ -205,21 +205,21 @@
 }
 
 .table-wrap thead th {
-  background: #090909;
-  color: #fff;
+  background: var(--color-090909);
+  color: var(--color-fff);
   text-align: left;
   padding: 10px;
 }
 
 .table-wrap tbody td {
-  background: #f8f8ff;
-  color: #111;
+  background: var(--color-f8f8ff);
+  color: var(--color-111);
   padding: 8px 10px;
-  border-bottom: 1px solid #d8dbff;
+  border-bottom: 1px solid var(--color-d8dbff);
 }
 
 .table-wrap tbody tr:nth-child(even) td {
-  background: #f0f2ff;
+  background: var(--color-f0f2ff);
 }
 
 .action-grid {
@@ -229,8 +229,8 @@
 }
 
 .action-btn {
-  background: linear-gradient(180deg, #ff1f2d 0%, #b30d18 100%);
-  color: #fff;
+  background: linear-gradient(180deg, var(--color-ff1f2d) 0%, var(--color-b30d18) 100%);
+  color: var(--color-fff);
   padding: 12px;
 }
 
@@ -247,13 +247,13 @@
 }
 
 .control-grid > div:nth-child(odd) {
-  background: #0a0a0a;
+  background: var(--color-0a0a0a);
   font-weight: 700;
 }
 
 .control-grid > div:nth-child(even) {
-  background: #f4f6ff;
-  color: #111;
+  background: var(--color-f4f6ff);
+  color: var(--color-111);
 }
 
 .control-buttons {
@@ -274,7 +274,7 @@
 }
 
 .voice-mode-control select {
-  border: 2px solid #0a0e3d;
+  border: 2px solid var(--color-0a0e3d);
   border-radius: 8px;
   padding: 10px;
   font-weight: 700;
@@ -294,9 +294,9 @@
 .bingo-call-banner {
   margin: 0 0 10px;
   border-radius: 10px;
-  border: 2px solid #ffe700;
-  background: linear-gradient(180deg, #ff2b3a 0%, #a60d16 100%);
-  color: #fff;
+  border: 2px solid var(--color-ffe700);
+  background: linear-gradient(180deg, var(--color-ff2b3a) 0%, var(--color-a60d16) 100%);
+  color: var(--color-fff);
   text-align: center;
   font-weight: 800;
   font-size: 22px;
@@ -309,16 +309,16 @@
   display: grid;
   grid-template-columns: repeat(10, minmax(0, 1fr));
   gap: 4px;
-  background: #f4f4f4;
+  background: var(--color-f4f4f4);
   border-radius: 8px;
   padding: 8px;
 }
 
 .number-board__cell {
   min-height: 32px;
-  border: 1px solid #c8c8d8;
-  background: #ffffff;
-  color: #101010;
+  border: 1px solid var(--color-c8c8d8);
+  background: var(--color-ffffff);
+  color: var(--color-101010);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -326,9 +326,9 @@
 }
 
 .number-board__cell.called {
-  background: #ffe700;
-  color: #090909;
-  border-color: #e0cb00;
+  background: var(--color-ffe700);
+  color: var(--color-090909);
+  border-color: var(--color-e0cb00);
 }
 
 .ticket-toolbar {
@@ -337,7 +337,7 @@
 
 .ticket-toolbar input {
   width: 100%;
-  border: 2px solid #0a0e3d;
+  border: 2px solid var(--color-0a0e3d);
   border-radius: 8px;
   padding: 10px;
 }
@@ -350,27 +350,27 @@
 }
 
 .ticket-booker input {
-  border: 2px solid #0a0e3d;
+  border: 2px solid var(--color-0a0e3d);
   border-radius: 8px;
   padding: 10px;
 }
 
 .ticket-booker select {
-  border: 2px solid #0a0e3d;
+  border: 2px solid var(--color-0a0e3d);
   border-radius: 8px;
   padding: 10px;
 }
 
 .ticket-booker button {
-  background: linear-gradient(180deg, #ff1f2d 0%, #b10d18 100%);
-  color: #fff;
+  background: linear-gradient(180deg, var(--color-ff1f2d) 0%, var(--color-b10d18) 100%);
+  color: var(--color-fff);
 }
 
 .poster-preview {
-  background: linear-gradient(180deg, #541785 0%, #330f59 80%);
+  background: linear-gradient(180deg, var(--color-541785) 0%, var(--color-330f59) 80%);
   border-radius: 10px;
   padding: 16px;
-  border: 2px solid #f2f2f2;
+  border: 2px solid var(--color-f2f2f2);
   margin-bottom: 12px;
 }
 
@@ -396,7 +396,7 @@
   grid-template-columns: 1fr auto;
   gap: 10px;
   padding: 4px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  border-bottom: 1px solid var(--color-rgba-255-255-255-02);
 }
 
 @media (max-width: 1024px) {

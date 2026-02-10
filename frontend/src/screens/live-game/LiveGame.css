@@ -2,10 +2,10 @@
   min-height: 100vh;
   padding: 18px 14px 44px;
   background:
-    radial-gradient(circle at 80% 4%, rgba(238, 28, 55, 0.2) 0, rgba(238, 28, 55, 0) 32%),
-    radial-gradient(circle at 15% 8%, rgba(60, 120, 255, 0.26) 0, rgba(60, 120, 255, 0) 28%),
-    linear-gradient(180deg, #070f3d 0%, #0f1e78 58%, #071139 100%);
-  color: #f3f5ff;
+    radial-gradient(circle at 80% 4%, var(--color-rgba-238-28-55-02) 0, var(--color-rgba-238-28-55-0) 32%),
+    radial-gradient(circle at 15% 8%, var(--color-rgba-60-120-255-026) 0, var(--color-rgba-60-120-255-0) 28%),
+    linear-gradient(180deg, var(--color-070f3d) 0%, var(--color-0f1e78) 58%, var(--color-071139) 100%);
+  color: var(--color-f3f5ff);
 }
 
 .live-header-card,
@@ -14,8 +14,8 @@
   max-width: 1080px;
   margin: 0 auto 14px;
   border-radius: 12px;
-  border: 2px solid #0d1346;
-  background: #111b71;
+  border: 2px solid var(--color-0d1346);
+  background: var(--color-111b71);
   box-shadow: var(--shadow);
 }
 
@@ -55,13 +55,13 @@
 }
 
 .ghost-btn {
-  color: #fff;
-  background: #0a0d26;
+  color: var(--color-fff);
+  background: var(--color-0a0d26);
 }
 
 .primary-btn {
-  color: #fff;
-  background: linear-gradient(180deg, #ff1f2d 0%, #b7101a 100%);
+  color: var(--color-fff);
+  background: linear-gradient(180deg, var(--color-ff1f2d) 0%, var(--color-b7101a) 100%);
 }
 
 .live-game-picker {
@@ -75,9 +75,9 @@
 }
 
 .live-game-picker select {
-  border: 2px solid #ffe700;
-  background: #08133d;
-  color: #fff;
+  border: 2px solid var(--color-ffe700);
+  background: var(--color-08133d);
+  color: var(--color-fff);
   border-radius: 8px;
   padding: 10px;
   font-weight: 700;
@@ -91,14 +91,14 @@
 
 .live-meta-grid div {
   border-radius: 8px;
-  border: 2px solid #0b0f34;
+  border: 2px solid var(--color-0b0f34);
   padding: 10px;
   display: grid;
   gap: 3px;
 }
 
 .live-meta-grid span {
-  color: #bec7ff;
+  color: var(--color-bec7ff);
   font-weight: 600;
 }
 
@@ -117,7 +117,7 @@
 }
 
 .live-voice-control select {
-  border: 2px solid #0a0f35;
+  border: 2px solid var(--color-0a0f35);
   border-radius: 8px;
   padding: 10px;
   font-weight: 700;
@@ -137,9 +137,9 @@
 .live-bingo-call {
   margin-top: 10px;
   border-radius: 10px;
-  border: 2px solid #ffe700;
-  background: linear-gradient(180deg, #ff2a39 0%, #9f0d15 100%);
-  color: #fff;
+  border: 2px solid var(--color-ffe700);
+  background: linear-gradient(180deg, var(--color-ff2a39) 0%, var(--color-9f0d15) 100%);
+  color: var(--color-fff);
   text-align: center;
   font-weight: 800;
   font-size: 24px;
@@ -160,7 +160,7 @@
 }
 
 .live-number-board {
-  background: #f4f6ff;
+  background: var(--color-f4f6ff);
   border-radius: 8px;
   padding: 8px;
   display: grid;
@@ -170,9 +170,9 @@
 
 .live-number-cell {
   min-height: 34px;
-  border: 1px solid #d6daf8;
-  background: #fff;
-  color: #111;
+  border: 1px solid var(--color-d6daf8);
+  background: var(--color-fff);
+  color: var(--color-111);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -180,8 +180,8 @@
 }
 
 .live-number-cell.called {
-  background: #ffe700;
-  border-color: #e8ce01;
+  background: var(--color-ffe700);
+  border-color: var(--color-e8ce01);
 }
 
 .live-prize-grid {
@@ -191,8 +191,8 @@
 }
 
 .prize-tile {
-  background: #08103b;
-  border: 2px solid #223589;
+  background: var(--color-08103b);
+  border: 2px solid var(--color-223589);
   border-radius: 8px;
   padding: 10px;
   display: grid;
@@ -209,8 +209,8 @@
 }
 
 .prize-tile.claimed {
-  border-color: #20ad63;
-  background: #0a3f25;
+  border-color: var(--color-20ad63);
+  background: var(--color-0a3f25);
 }
 
 .live-table-wrap {
@@ -224,17 +224,17 @@
 }
 
 .live-table-wrap th {
-  background: #090909;
-  color: #fff;
+  background: var(--color-090909);
+  color: var(--color-fff);
   text-align: left;
   padding: 10px;
 }
 
 .live-table-wrap td {
-  background: #f4f6ff;
-  color: #111;
+  background: var(--color-f4f6ff);
+  color: var(--color-111);
   padding: 8px 10px;
-  border-bottom: 1px solid #d2d8ff;
+  border-bottom: 1px solid var(--color-d2d8ff);
 }
 
 .live-ticket-list {
@@ -243,7 +243,7 @@
 }
 
 .live-empty {
-  border: 2px dashed #7a89db;
+  border: 2px dashed var(--color-7a89db);
   border-radius: 8px;
   text-align: center;
   padding: 16px;
@@ -254,7 +254,7 @@
 }
 
 .live-message.error {
-  border-color: #ff3247;
+  border-color: var(--color-ff3247);
 }
 
 .winner-overlay {
@@ -263,8 +263,8 @@
   bottom: 18px;
   transform: translateX(-50%);
   width: min(560px, calc(100vw - 24px));
-  background: linear-gradient(180deg, #ff1f2d 0%, #9f0d16 100%);
-  border: 2px solid #ffe700;
+  background: linear-gradient(180deg, var(--color-ff1f2d) 0%, var(--color-9f0d16) 100%);
+  border: 2px solid var(--color-ffe700);
   border-radius: 10px;
   box-shadow: var(--shadow);
   padding: 12px;

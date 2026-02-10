@@ -1,12 +1,15 @@
+import { useMemo } from 'react'
 import type { PlayerTicket } from '@/types/backend/ticket'
 import './TambolaTicketCard.css'
 
 type TambolaTicketCardProps = {
   ticket: PlayerTicket
+  calledNumbers?: number[]
 }
 
-const TambolaTicketCard = ({ ticket }: TambolaTicketCardProps) => {
+const TambolaTicketCard = ({ ticket, calledNumbers }: TambolaTicketCardProps) => {
   const isBooked = ticket.status === 'BOOKED'
+  const calledSet = useMemo(() => new Set(calledNumbers ?? []), [calledNumbers])
   const ownerLabel = isBooked
     ? ticket.player_name && ticket.player_name.trim().length > 0
       ? ticket.player_name
@@ -32,11 +35,17 @@ const TambolaTicketCard = ({ ticket }: TambolaTicketCardProps) => {
       <div className="ticket-grid-wrapper">
         <div className="ticket-grid">
           {ticket.ticket_data.rows.map((row, rowIndex) =>
-            row.map((value, cellIndex) => (
-              <div className="ticket-cell" key={`${ticket.ticket_number}-${rowIndex}-${cellIndex}`}>
-                {value ?? ''}
-              </div>
-            )),
+            row.map((value, cellIndex) => {
+              const isCalled = isBooked && value !== null && calledSet.has(value)
+              return (
+                <div
+                  className={`ticket-cell ${isCalled ? 'called' : ''}`}
+                  key={`${ticket.ticket_number}-${rowIndex}-${cellIndex}`}
+                >
+                  {value ?? ''}
+                </div>
+              )
+            }),
           )}
         </div>
         <div className="ticket-side-strip" />

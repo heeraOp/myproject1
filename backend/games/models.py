@@ -20,6 +20,12 @@ class Game(models.Model):
         OPEN = "OPEN", "Open"
         CLOSED = "CLOSED", "Closed"
 
+    class Theme(models.TextChoices):
+        DARK = "dark", "Dark"
+        LIGHT = "light", "Light"
+        FESTIVAL_GOLD = "festival-gold", "Festival Gold"
+        FESTIVAL_DIWALI = "festival-diwali", "Festival Diwali"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     status = models.CharField(max_length=20, choices=Status.choices)
     game_datetime = models.DateTimeField()
@@ -28,6 +34,7 @@ class Game(models.Model):
     total_ticket_limit = models.PositiveIntegerField()
     booking_status = models.CharField(max_length=10, choices=BookingStatus.choices)
     website_status = models.CharField(max_length=10, choices=WebsiteStatus.choices, default=WebsiteStatus.OPEN)
+    active_theme = models.CharField(max_length=20, choices=Theme.choices, default=Theme.DARK)
     calling_interval = models.PositiveIntegerField(default=10)
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)

@@ -264,7 +264,16 @@ class PlayerTicketListView(APIView):
         except Game.DoesNotExist:
             return Response({"detail": "Game not found."}, status=404)
 
-        tickets = Ticket.objects.filter(game=game).order_by("ticket_number")
+        tickets = Ticket.objects.filter(game=game)
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            status_value = str(status_filter).upper()
+            valid_statuses = {choice[0] for choice in Ticket.Status.choices}
+            if status_value not in valid_statuses:
+                return Response({"detail": "Invalid status filter."}, status=400)
+            tickets = tickets.filter(status=status_value)
+
+        tickets = tickets.order_by("ticket_number")
         serializer = PlayerTicketSerializer(tickets, many=True)
         return Response(serializer.data)
 

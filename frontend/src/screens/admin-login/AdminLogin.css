@@ -4,10 +4,10 @@
   place-items: center;
   padding: 32px 16px;
   background:
-    radial-gradient(circle at 15% 15%, rgba(255, 213, 0, 0.35), transparent 45%),
-    radial-gradient(circle at 85% 20%, rgba(255, 60, 0, 0.35), transparent 42%),
-    radial-gradient(circle at 70% 85%, rgba(0, 180, 255, 0.28), transparent 45%),
-    linear-gradient(135deg, #0b0f3f 0%, #0f1455 45%, #1f0f4a 100%);
+    radial-gradient(circle at 15% 15%, var(--color-rgba-255-213-0-035), transparent 45%),
+    radial-gradient(circle at 85% 20%, var(--color-rgba-255-60-0-035), transparent 42%),
+    radial-gradient(circle at 70% 85%, var(--color-rgba-0-180-255-028), transparent 45%),
+    linear-gradient(135deg, var(--color-0b0f3f) 0%, var(--color-0f1455) 45%, var(--color-1f0f4a) 100%);
 }
 
 .admin-login-panel {
@@ -15,11 +15,11 @@
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
   gap: 24px;
-  background: rgba(10, 12, 46, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-rgba-10-12-46-07);
+  border: 1px solid var(--color-rgba-255-255-255-008);
   border-radius: 24px;
   padding: 24px;
-  box-shadow: 0 30px 80px rgba(6, 8, 35, 0.6);
+  box-shadow: 0 30px 80px var(--color-rgba-6-8-35-06);
   backdrop-filter: blur(18px);
   position: relative;
   overflow: hidden;
@@ -31,7 +31,7 @@
   inset: -120px -40px auto auto;
   width: 280px;
   height: 280px;
-  background: radial-gradient(circle, rgba(255, 231, 0, 0.45), transparent 65%);
+  background: radial-gradient(circle, var(--color-rgba-255-231-0-045), transparent 65%);
   opacity: 0.8;
   pointer-events: none;
 }
@@ -42,7 +42,7 @@
   inset: auto auto -130px -90px;
   width: 320px;
   height: 320px;
-  background: radial-gradient(circle, rgba(0, 185, 255, 0.35), transparent 65%);
+  background: radial-gradient(circle, var(--color-rgba-0-185-255-035), transparent 65%);
   opacity: 0.8;
   pointer-events: none;
 }
@@ -60,7 +60,7 @@
   text-transform: uppercase;
   letter-spacing: 0.35em;
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-rgba-255-255-255-06);
 }
 
 .admin-login-hero h1 {
@@ -72,13 +72,13 @@
 }
 
 .admin-login-hero h1 span {
-  color: #ffe700;
+  color: var(--color-ffe700);
 }
 
 .admin-login-subtitle {
   margin: 0;
   max-width: 36ch;
-  color: rgba(244, 246, 255, 0.75);
+  color: var(--color-rgba-244-246-255-075);
   font-size: 1rem;
 }
 
@@ -91,8 +91,8 @@
 .admin-login-badges span {
   padding: 6px 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--color-rgba-255-255-255-008);
+  border: 1px solid var(--color-rgba-255-255-255-015);
   font-size: 0.85rem;
 }
 
@@ -100,11 +100,11 @@
   width: 100%;
   display: grid;
   gap: 16px;
-  background: linear-gradient(180deg, rgba(20, 29, 120, 0.95), rgba(12, 20, 85, 0.92));
+  background: linear-gradient(180deg, var(--color-rgba-20-29-120-095), var(--color-rgba-12-20-85-092));
   border-radius: 18px;
   padding: 22px;
-  box-shadow: 0 18px 40px rgba(3, 6, 28, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 18px 40px var(--color-rgba-3-6-28-06);
+  border: 1px solid var(--color-rgba-255-255-255-01);
   position: relative;
   z-index: 1;
 }
@@ -116,30 +116,30 @@
 
 .admin-login-form-head p {
   margin: 6px 0 0;
-  color: rgba(244, 246, 255, 0.7);
+  color: var(--color-rgba-244-246-255-07);
 }
 
 .admin-login-field {
   display: grid;
   gap: 6px;
   font-size: 0.9rem;
-  color: rgba(244, 246, 255, 0.8);
+  color: var(--color-rgba-244-246-255-08);
 }
 
 .admin-login-field input {
-  background: rgba(7, 12, 40, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--color-rgba-7-12-40-07);
+  border: 1px solid var(--color-rgba-255-255-255-018);
   border-radius: 12px;
   padding: 12px 14px;
-  color: #f4f6ff;
+  color: var(--color-f4f6ff);
   font-size: 1rem;
   outline: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .admin-login-field input:focus {
-  border-color: rgba(255, 231, 0, 0.8);
-  box-shadow: 0 0 0 3px rgba(255, 231, 0, 0.2);
+  border-color: var(--color-rgba-255-231-0-08);
+  box-shadow: 0 0 0 3px var(--color-rgba-255-231-0-02);
 }
 
 .admin-login-submit {
@@ -148,8 +148,8 @@
   padding: 12px 16px;
   font-size: 1rem;
   font-weight: 600;
-  color: #0b0b0b;
-  background: linear-gradient(135deg, #ffe700 0%, #ffb400 100%);
+  color: var(--color-0b0b0b);
+  background: linear-gradient(135deg, var(--color-ffe700) 0%, var(--color-ffb400) 100%);
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
@@ -161,13 +161,13 @@
 
 .admin-login-submit:not(:disabled):hover {
   transform: translateY(-1px);
-  box-shadow: 0 10px 18px rgba(255, 199, 0, 0.35);
+  box-shadow: 0 10px 18px var(--color-rgba-255-199-0-035);
 }
 
 .admin-login-error {
-  color: #ffd7d7;
-  background: rgba(100, 10, 16, 0.4);
-  border: 1px solid rgba(255, 140, 140, 0.35);
+  color: var(--color-ffd7d7);
+  background: var(--color-rgba-100-10-16-04);
+  border: 1px solid var(--color-rgba-255-140-140-035);
   padding: 10px 12px;
   border-radius: 10px;
   font-size: 0.9rem;

@@ -3,8 +3,8 @@
 }
 
 .ticket-card__header {
-  background: #2f61de;
-  color: #fff;
+  background: var(--color-2f61de);
+  color: var(--color-fff);
   border-radius: 10px 10px 0 0;
   padding: 10px 14px;
   display: flex;
@@ -23,34 +23,34 @@
 }
 
 .ticket-status.booked {
-  color: #e5f3ff;
+  color: var(--color-e5f3ff);
 }
 
 .ticket-status.open {
-  color: #ffe700;
+  color: var(--color-ffe700);
 }
 
 .ticket-grid-wrapper {
   display: grid;
   grid-template-columns: 1fr 44px;
-  background: #ffe700;
+  background: var(--color-ffe700);
   border-radius: 0 0 12px 12px;
   padding: 6px;
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 12px 24px var(--color-rgba-0-0-0-035);
 }
 
 .ticket-grid {
-  background: #efefef;
-  border: 2px solid #dadada;
+  background: var(--color-efefef);
+  border: 2px solid var(--color-dadada);
   display: grid;
   grid-template-columns: repeat(9, 1fr);
 }
 
 .ticket-cell {
   min-height: 58px;
-  border: 1px solid #d3d3d3;
-  background: #fafafa;
-  color: #121212;
+  border: 1px solid var(--color-d3d3d3);
+  background: var(--color-fafafa);
+  color: var(--color-121212);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -58,8 +58,14 @@
   font-weight: 800;
 }
 
+.ticket-cell.called {
+  background: var(--color-ffe700);
+  border-color: var(--color-e0cb00);
+  color: var(--color-090909);
+}
+
 .ticket-side-strip {
-  background: linear-gradient(180deg, #ff038f 0%, #d5007d 100%);
+  background: linear-gradient(180deg, var(--color-ff038f) 0%, var(--color-d5007d) 100%);
   border-radius: 0 0 8px 0;
 }
 

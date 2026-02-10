@@ -1,4 +1,5 @@
 import { apiClient } from '@/api/rest/client'
+import type { ThemeName } from '@/types/backend/game'
 
 export type PublicGameSummary = {
   game: {
@@ -10,6 +11,7 @@ export type PublicGameSummary = {
     total_tickets: number
     ticket_price: number
     agent_commission: number
+    active_theme?: ThemeName
   }
   prizes: Array<{
     prize_type: string

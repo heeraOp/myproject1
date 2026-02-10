@@ -16,6 +16,7 @@ import {
   resumeGame,
   saveGameSettings,
   startGame,
+  updateActiveTheme,
   updatePrizes,
   type GameBusinessSummaryResponse,
   type GameSummaryResponse,
@@ -31,6 +32,13 @@ import TambolaTicketCard from '@/components/common/TambolaTicketCard'
 import { socketManager } from '@/api/websocket/socketManager'
 import type { PublicGame } from '@/types/backend/game'
 import { jsPDF } from 'jspdf'
+import {
+  formatThemeLabel,
+  getActiveTheme,
+  setAdminTheme,
+  subscribeThemeChange,
+  toggleAdminTheme,
+} from '@/utils/theme'
 import './AdminDashboard.css'
 
 type SettingsForm = {
@@ -162,6 +170,7 @@ const AdminDashboard = () => {
   const [savingPrizes, setSavingPrizes] = useState(false)
   const [bookingTicket, setBookingTicket] = useState(false)
   const [showTicketCards, setShowTicketCards] = useState(false)
+  const [theme, setTheme] = useState(getActiveTheme())
 
   const [settingsForm, setSettingsForm] = useState<SettingsForm>({
     gameDateTime: '',
@@ -177,6 +186,29 @@ const AdminDashboard = () => {
     playerName: '',
     playerPhone: '',
   })
+
+  const handleThemeToggle = async () => {
+    if (!gameId) {
+      setActionMessage('Select a game to update the theme.')
+      return
+    }
+    const previous = getActiveTheme()
+    const next = toggleAdminTheme()
+    setTheme(next)
+    try {
+      await updateActiveTheme(gameId, next)
+    } catch {
+      setActionMessage('Unable to update theme. Please try again.')
+      setAdminTheme(previous)
+      setTheme(previous)
+    }
+  }
+
+  useEffect(() => {
+    return subscribeThemeChange(({ theme: updatedTheme }) => {
+      setTheme(updatedTheme)
+    })
+  }, [])
 
   const ticketSectionRef = useRef<HTMLElement | null>(null)
   const winnerSectionRef = useRef<HTMLElement | null>(null)
@@ -638,17 +670,6 @@ const AdminDashboard = () => {
     navigate('/admin?setup=1')
   }
 
-  const ensureTicketsAvailable = useCallback(async () => {
-    if (!gameId) return
-
-    // "Show current ticket" must load all existing tickets without generating new ones.
-    const existingTickets = await getTickets(gameId)
-    if (existingTickets.length === 0) {
-      throw new Error('No generated tickets found for this game.')
-    }
-    setTickets(existingTickets)
-  }, [gameId])
-
   const actionHandlers: Array<{
     key: string
     label: string
@@ -701,18 +722,9 @@ const AdminDashboard = () => {
     {
       key: 'current-ticket',
       label: 'Show current ticket',
-      handler: async () => {
+      handler: () => {
         if (!gameId) return
-        try {
-          await ensureTicketsAvailable()
-          setSearchKeyword('')
-          // Render as Tambola ticket cards for current tickets view.
-          setShowTicketCards(true)
-          ticketSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
-          setActionMessage('Current tickets loaded.')
-        } catch (actionError) {
-          setActionMessage(getErrorMessage(actionError))
-        }
+        navigate(`/admin/tickets?gameId=${gameId}`)
       },
     },
     {
@@ -774,6 +786,9 @@ const AdminDashboard = () => {
               </option>
             ))}
           </select>
+          <button type="button" className="secondary-btn" onClick={handleThemeToggle}>
+            Theme: {formatThemeLabel(theme)}
+          </button>
         </div>
       </header>
 
@@ -1195,7 +1210,11 @@ const AdminDashboard = () => {
           {showTicketCards ? (
             <div>
               {filteredTickets.map((ticket) => (
-                <TambolaTicketCard key={ticket.ticket_number} ticket={ticket} />
+                <TambolaTicketCard
+                  key={ticket.ticket_number}
+                  ticket={ticket}
+                  calledNumbers={calledNumbers}
+                />
               ))}
             </div>
           ) : (

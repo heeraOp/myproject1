@@ -2,16 +2,16 @@
   min-height: 100vh;
   padding: 18px 14px 40px;
   background:
-    radial-gradient(circle at 20% 15%, rgba(255, 66, 66, 0.3) 0, rgba(255, 66, 66, 0) 28%),
-    radial-gradient(circle at 80% 20%, rgba(90, 120, 255, 0.42) 0, rgba(90, 120, 255, 0) 30%),
-    linear-gradient(180deg, #080631 0%, #121a63 55%, #080a37 100%);
+    radial-gradient(circle at 20% 15%, var(--color-rgba-255-66-66-03) 0, var(--color-rgba-255-66-66-0) 28%),
+    radial-gradient(circle at 80% 20%, var(--color-rgba-90-120-255-042) 0, var(--color-rgba-90-120-255-0) 30%),
+    linear-gradient(180deg, var(--color-080631) 0%, var(--color-121a63) 55%, var(--color-080a37) 100%);
 }
 
 .lobby-panel {
   max-width: 920px;
   margin: 0 auto;
-  background: rgba(8, 8, 20, 0.78);
-  border: 3px solid #ffe700;
+  background: var(--color-rgba-8-8-20-078);
+  border: 3px solid var(--color-ffe700);
   border-radius: 12px;
   padding: 14px;
 }
@@ -34,20 +34,20 @@
 }
 
 .lobby-game-picker select {
-  border: 2px solid #ffe700;
+  border: 2px solid var(--color-ffe700);
   border-radius: 8px;
-  background: #0b1b73;
-  color: #fff;
+  background: var(--color-0b1b73);
+  color: var(--color-fff);
   padding: 10px;
   font-size: 15px;
   font-weight: 700;
 }
 
 .action-link {
-  border: 2px solid #ffe700;
+  border: 2px solid var(--color-ffe700);
   border-radius: 10px;
-  background: #08093f;
-  color: #fff;
+  background: var(--color-08093f);
+  color: var(--color-fff);
   font-weight: 700;
   text-align: center;
   padding: 10px 6px;
@@ -58,8 +58,8 @@
 
 .check-title {
   margin-top: 12px;
-  background: #000;
-  color: #ff0a0a;
+  background: var(--color-000);
+  color: var(--color-ff0a0a);
   text-align: center;
   font-family: 'Bebas Neue', sans-serif;
   font-size: 48px;
@@ -76,31 +76,31 @@
 }
 
 .status-chip {
-  border: 2px solid #ffe700;
+  border: 2px solid var(--color-ffe700);
   border-radius: 8px;
   text-align: center;
   padding: 10px 8px;
   font-weight: 800;
-  background: #0a1458;
+  background: var(--color-0a1458);
 }
 
 .status-chip.running {
-  background: #066b2b;
+  background: var(--color-066b2b);
 }
 
 .status-chip.open {
-  background: #0c4e9f;
+  background: var(--color-0c4e9f);
 }
 
 .status-chip.closed {
-  background: #702a00;
+  background: var(--color-702a00);
 }
 
 .enter-live-btn {
   border: none;
   border-radius: 8px;
-  background: linear-gradient(180deg, #ff1f2d 0%, #b50e18 100%);
-  color: #fff;
+  background: linear-gradient(180deg, var(--color-ff1f2d) 0%, var(--color-b50e18) 100%);
+  color: var(--color-fff);
   font-weight: 800;
   padding: 10px 8px;
   cursor: pointer;
@@ -122,16 +122,16 @@
 }
 
 .count-labels span {
-  color: #f2f4ff;
+  color: var(--color-f2f4ff);
   text-align: center;
   font-size: 30px;
   font-weight: 700;
 }
 
 .count-values span {
-  background: #f2f2f2;
-  border: 3px solid #ffe700;
-  color: #1a1a1a;
+  background: var(--color-f2f2f2);
+  border: 3px solid var(--color-ffe700);
+  color: var(--color-1a1a1a);
   border-radius: 8px;
   text-align: center;
   font-size: 44px;
@@ -144,10 +144,10 @@
 }
 
 .date-time span {
-  background: #041c82;
-  border: 2px solid #ffe700;
+  background: var(--color-041c82);
+  border: 2px solid var(--color-ffe700);
   border-radius: 8px;
-  color: #fff;
+  color: var(--color-fff);
   text-align: center;
   font-size: 34px;
   font-weight: 700;
@@ -162,9 +162,9 @@
 }
 
 .ticket-stats > div {
-  border: 2px solid #ffe700;
+  border: 2px solid var(--color-ffe700);
   border-radius: 8px;
-  background: #081b72;
+  background: var(--color-081b72);
   text-align: center;
   padding: 10px 8px;
   display: grid;
@@ -183,15 +183,15 @@
 .state-box {
   margin-top: 14px;
   padding: 14px;
-  background: #091867;
-  border: 2px solid #ffe700;
+  background: var(--color-091867);
+  border: 2px solid var(--color-ffe700);
   border-radius: 8px;
   text-align: center;
   font-size: 22px;
 }
 
 .state-error {
-  border-color: #ff2c2c;
+  border-color: var(--color-ff2c2c);
 }
 
 @media (max-width: 900px) {
