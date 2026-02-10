@@ -1,4 +1,6 @@
 from django.db.models import Sum
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -7,8 +9,23 @@ from games.models import Game
 from tickets.models import Ticket
 
 
+class IsAdminRole(BasePermission):
+    """
+    Admin-only permission based on user role or staff/superuser flags.
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if getattr(user, "role", None) == "ADMIN":
+            return True
+        return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+
+
 class RevenueReportView(APIView):
-    authentication_classes = []
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAdminRole]
 
     def get(self, request):
         games = list(Game.objects.filter(status=Game.Status.FINISHED))

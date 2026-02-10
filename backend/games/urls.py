@@ -4,6 +4,9 @@ from .views import (
     AdminCallNextNumberView,
     AdminGameListCreateView,
     AdminPauseGameView,
+    AdminResetAgentView,
+    AdminResetCallView,
+    AdminResetTicketView,
     AdminResumeGameView,
     AdminStartGameView,
     GameBusinessSummaryView,
@@ -22,4 +25,7 @@ urlpatterns = [
     path("admin/<uuid:game_id>/pause/", AdminPauseGameView.as_view(), name="admin-game-pause"),
     path("admin/<uuid:game_id>/resume/", AdminResumeGameView.as_view(), name="admin-game-resume"),
     path("admin/<uuid:game_id>/call-next/", AdminCallNextNumberView.as_view(), name="admin-game-call-next"),
+    path("admin/<uuid:game_id>/reset-call/", AdminResetCallView.as_view(), name="admin-game-reset-call"),
+    path("admin/<uuid:game_id>/reset-ticket/", AdminResetTicketView.as_view(), name="admin-game-reset-ticket"),
+    path("admin/<uuid:game_id>/reset-agent/", AdminResetAgentView.as_view(), name="admin-game-reset-agent"),
 ]

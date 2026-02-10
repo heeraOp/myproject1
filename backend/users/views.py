@@ -1,4 +1,5 @@
 from django.contrib.auth import authenticate, login
+from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.permissions import AllowAny
@@ -7,7 +8,16 @@ from rest_framework.views import APIView
 
 from .serializers import UserRegistrationSerializer
 
+class CsrfTokenView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response({"csrfToken": get_token(request)})
+
+@method_decorator(csrf_exempt, name="dispatch")
 class LoginView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
 
     def post(self, request):

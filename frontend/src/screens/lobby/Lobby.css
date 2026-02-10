@@ -1,0 +1,236 @@
+.lobby-shell {
+  min-height: 100vh;
+  padding: 18px 14px 40px;
+  background:
+    radial-gradient(circle at 20% 15%, rgba(255, 66, 66, 0.3) 0, rgba(255, 66, 66, 0) 28%),
+    radial-gradient(circle at 80% 20%, rgba(90, 120, 255, 0.42) 0, rgba(90, 120, 255, 0) 30%),
+    linear-gradient(180deg, #080631 0%, #121a63 55%, #080a37 100%);
+}
+
+.lobby-panel {
+  max-width: 920px;
+  margin: 0 auto;
+  background: rgba(8, 8, 20, 0.78);
+  border: 3px solid #ffe700;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.lobby-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lobby-game-picker {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.lobby-game-picker label {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.lobby-game-picker select {
+  border: 2px solid #ffe700;
+  border-radius: 8px;
+  background: #0b1b73;
+  color: #fff;
+  padding: 10px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.action-link {
+  border: 2px solid #ffe700;
+  border-radius: 10px;
+  background: #08093f;
+  color: #fff;
+  font-weight: 700;
+  text-align: center;
+  padding: 10px 6px;
+  text-transform: uppercase;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.check-title {
+  margin-top: 12px;
+  background: #000;
+  color: #ff0a0a;
+  text-align: center;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 48px;
+  letter-spacing: 1.2px;
+  padding: 24px 12px;
+  border-radius: 8px;
+}
+
+.lobby-status-row {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.status-chip {
+  border: 2px solid #ffe700;
+  border-radius: 8px;
+  text-align: center;
+  padding: 10px 8px;
+  font-weight: 800;
+  background: #0a1458;
+}
+
+.status-chip.running {
+  background: #066b2b;
+}
+
+.status-chip.open {
+  background: #0c4e9f;
+}
+
+.status-chip.closed {
+  background: #702a00;
+}
+
+.enter-live-btn {
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ff1f2d 0%, #b50e18 100%);
+  color: #fff;
+  font-weight: 800;
+  padding: 10px 8px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.enter-live-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.count-labels,
+.count-values,
+.date-time {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.count-labels span {
+  color: #f2f4ff;
+  text-align: center;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.count-values span {
+  background: #f2f2f2;
+  border: 3px solid #ffe700;
+  color: #1a1a1a;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 44px;
+  font-weight: 800;
+  padding: 6px 4px;
+}
+
+.date-time {
+  grid-template-columns: 1fr 1fr;
+}
+
+.date-time span {
+  background: #041c82;
+  border: 2px solid #ffe700;
+  border-radius: 8px;
+  color: #fff;
+  text-align: center;
+  font-size: 34px;
+  font-weight: 700;
+  padding: 10px 8px;
+}
+
+.ticket-stats {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ticket-stats > div {
+  border: 2px solid #ffe700;
+  border-radius: 8px;
+  background: #081b72;
+  text-align: center;
+  padding: 10px 8px;
+  display: grid;
+  gap: 2px;
+}
+
+.ticket-stats strong {
+  font-size: 16px;
+}
+
+.ticket-stats span {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.state-box {
+  margin-top: 14px;
+  padding: 14px;
+  background: #091867;
+  border: 2px solid #ffe700;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 22px;
+}
+
+.state-error {
+  border-color: #ff2c2c;
+}
+
+@media (max-width: 900px) {
+  .check-title {
+    font-size: 34px;
+    padding: 16px 10px;
+  }
+
+  .count-labels span {
+    font-size: 22px;
+  }
+
+  .count-values span {
+    font-size: 30px;
+  }
+
+  .date-time span {
+    font-size: 24px;
+  }
+}
+
+@media (max-width: 560px) {
+  .lobby-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .action-link {
+    font-size: 13px;
+  }
+
+  .date-time {
+    grid-template-columns: 1fr;
+  }
+
+  .lobby-status-row {
+    grid-template-columns: 1fr;
+  }
+
+  .ticket-stats {
+    grid-template-columns: 1fr;
+  }
+}

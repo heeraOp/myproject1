@@ -15,8 +15,10 @@ from rest_framework.views import APIView
 from .models import Game
 from .utils.calling import call_next_number
 from .tasks import auto_call_numbers
-from claims.models import Winner, Prize
+from claims.models import Claim, Winner, Prize
 from claims.serializers import WinnerSerializer
+from tickets.models import Ticket
+from tickets.utils.generator import generate_housie_ticket
 
 
 class IsAdminRole(BasePermission):
@@ -47,6 +49,131 @@ def _configured_status():
     Resolve the configured status. If not defined on the model, fall back to CREATED.
     """
     return getattr(Game.Status, "CONFIGURED", Game.Status.CREATED)
+
+
+def _mark_game_finished_if_numbers_exhausted(game):
+    """
+    Mark game as FINISHED when all 90 numbers are called and broadcast once.
+    Returns True when the game transitioned in this call.
+    """
+    if game.status == Game.Status.FINISHED:
+        return False
+
+    if game.called_numbers.count() < 90:
+        return False
+
+    with transaction.atomic():
+        locked_game = get_object_or_404(Game.objects.select_for_update(), id=game.id)
+        if locked_game.status == Game.Status.FINISHED:
+            return False
+        if locked_game.called_numbers.count() < 90:
+            return False
+
+        locked_game.status = Game.Status.FINISHED
+        locked_game.ended_at = timezone.now()
+        locked_game.save(update_fields=["status", "ended_at"])
+
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f"game_{str(game.id)}",
+        {
+            "type": "game_finished",
+        },
+    )
+    return True
+
+
+def _clear_claim_progress(game):
+    """
+    Clear winner/claim progress and reopen claimed prizes for a game.
+    """
+    Claim.objects.filter(game=game).delete()
+    Winner.objects.filter(game=game).delete()
+    game.prizes.filter(is_claimed=True).update(is_claimed=False)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AdminResetCallView(APIView):
+    """
+    Admin-only endpoint to clear called numbers and claim progress.
+    """
+
+    permission_classes = [IsAdminRole]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def post(self, request, game_id):
+        with transaction.atomic():
+            game = get_object_or_404(Game.objects.select_for_update(), id=game_id)
+
+            if game.status == Game.Status.RUNNING:
+                return Response({"detail": "Cannot reset calls while game is RUNNING."}, status=400)
+
+            deleted_called, _ = game.called_numbers.all().delete()
+            _clear_claim_progress(game)
+
+            if game.status in (Game.Status.PAUSED, Game.Status.FINISHED):
+                game.status = Game.Status.CREATED
+                game.ended_at = None
+                game.save(update_fields=["status", "ended_at"])
+
+        return Response({"detail": "Call history reset.", "cleared_called_numbers": deleted_called})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AdminResetTicketView(APIView):
+    """
+    Admin-only endpoint to clear ticket assignments.
+    """
+
+    permission_classes = [IsAdminRole]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def post(self, request, game_id):
+        with transaction.atomic():
+            game = get_object_or_404(Game.objects.select_for_update(), id=game_id)
+
+            if game.status == Game.Status.RUNNING:
+                return Response({"detail": "Cannot reset tickets while game is RUNNING."}, status=400)
+
+            updated = game.tickets.update(
+                player_name=None,
+                player_phone=None,
+                status=Ticket.Status.OPEN,
+                ticket_type=Ticket.TicketType.RANDOM,
+                booked_at=None,
+            )
+
+            _clear_claim_progress(game)
+
+        return Response({"detail": "Tickets reset.", "updated_tickets": updated})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AdminResetAgentView(APIView):
+    """
+    Admin-only endpoint to clear agent/player assignments from tickets.
+    """
+
+    permission_classes = [IsAdminRole]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def post(self, request, game_id):
+        with transaction.atomic():
+            game = get_object_or_404(Game.objects.select_for_update(), id=game_id)
+
+            if game.status == Game.Status.RUNNING:
+                return Response({"detail": "Cannot reset agents while game is RUNNING."}, status=400)
+
+            updated = game.tickets.update(
+                player_name=None,
+                player_phone=None,
+                status=Ticket.Status.OPEN,
+                booked_at=None,
+            )
+
+            _clear_claim_progress(game)
+
+        return Response({"detail": "Agent assignments reset.", "updated_tickets": updated})
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -168,7 +295,10 @@ class AdminCallNextNumberView(APIView):
         try:
             number = call_next_number(game)
         except (ValueError, RuntimeError) as exc:
+            _mark_game_finished_if_numbers_exhausted(game)
             return Response({"detail": str(exc)}, status=400)
+
+        _mark_game_finished_if_numbers_exhausted(game)
 
         return Response({"number": number})
 
@@ -191,8 +321,11 @@ class AdminGameListCreateView(APIView):
                     "id": str(game.id),
                     "date": game.game_datetime,
                     "status": game.status,
+                    "booking_status": game.booking_status,
+                    "website_status": game.website_status,
                     "total_tickets": game.total_ticket_limit,
                     "ticket_price": game.ticket_price,
+                    "agent_commission": game.agent_commission,
                 }
             )
         return Response(data)
@@ -219,27 +352,63 @@ class AdminGameListCreateView(APIView):
         except (TypeError, ValueError):
             return Response({"detail": "total_tickets must be an integer."}, status=400)
 
+        try:
+            agent_commission = int(request.data.get("agent_commission", 0))
+        except (TypeError, ValueError):
+            return Response({"detail": "agent_commission must be an integer."}, status=400)
+
+        booking_status = str(request.data.get("booking_status", Game.BookingStatus.OPEN)).upper()
+        if booking_status not in {choice[0] for choice in Game.BookingStatus.choices}:
+            return Response({"detail": "Invalid booking_status."}, status=400)
+
+        website_status = str(request.data.get("website_status", Game.WebsiteStatus.OPEN)).upper()
+        if website_status not in {choice[0] for choice in Game.WebsiteStatus.choices}:
+            return Response({"detail": "Invalid website_status."}, status=400)
+
         if ticket_price <= 0:
             return Response({"detail": "ticket_price must be greater than 0."}, status=400)
         if total_tickets <= 0:
             return Response({"detail": "total_tickets must be greater than 0."}, status=400)
+        if agent_commission < 0:
+            return Response({"detail": "agent_commission cannot be negative."}, status=400)
 
         game = Game.objects.create(
             status=Game.Status.CREATED,
-            booking_status=Game.BookingStatus.OPEN,
+            booking_status=booking_status,
+            website_status=website_status,
             game_datetime=game_datetime,
             ticket_price=ticket_price,
+            agent_commission=agent_commission,
             total_ticket_limit=total_tickets,
             created_by=request.user,
         )
+
+        # Pre-generate all tickets immediately on game setup (avoid lazy generation).
+        if not Ticket.objects.filter(game=game).exists():
+            tickets = []
+            for ticket_number in range(1, total_tickets + 1):
+                ticket_data = generate_housie_ticket()
+                tickets.append(
+                    Ticket(
+                        game=game,
+                        ticket_number=ticket_number,
+                        ticket_type=Ticket.TicketType.RANDOM,
+                        ticket_data=ticket_data,
+                        status=Ticket.Status.OPEN,
+                    )
+                )
+            Ticket.objects.bulk_create(tickets)
 
         return Response(
             {
                 "id": str(game.id),
                 "date": game.game_datetime,
                 "status": game.status,
+                "booking_status": game.booking_status,
+                "website_status": game.website_status,
                 "total_tickets": game.total_ticket_limit,
                 "ticket_price": game.ticket_price,
+                "agent_commission": game.agent_commission,
             },
             status=201,
         )
@@ -251,6 +420,7 @@ class PublicGameSerializer(serializers.Serializer):
     status = serializers.CharField(read_only=True)
     ticket_price = serializers.IntegerField(read_only=True)
     booking_status = serializers.CharField(read_only=True)
+    website_status = serializers.CharField(read_only=True)
 
 
 class PublicGameListView(APIView):
@@ -259,6 +429,7 @@ class PublicGameListView(APIView):
     def get(self, request):
         games = Game.objects.filter(
             status__in=[Game.Status.CREATED, Game.Status.RUNNING, Game.Status.PAUSED],
+            website_status=Game.WebsiteStatus.OPEN,
         ).order_by("game_datetime", "id")
         serializer = PublicGameSerializer(games, many=True)
         return Response(serializer.data)
@@ -297,6 +468,7 @@ class GameStateView(APIView):
                     "calling_status": calling_status,
                     "calling_interval": game.calling_interval,
                     "booking_status": game.booking_status,
+                    "website_status": game.website_status,
                 },
                 "called_numbers": called_numbers,
                 "won_prizes": won_prizes,
@@ -311,7 +483,8 @@ class GameBusinessSummaryView(APIView):
         game = get_object_or_404(Game, id=game_id)
 
         tickets_qs = game.tickets.all()
-        total_tickets = tickets_qs.count()
+        # Total ticket capacity comes from configured game settings.
+        total_tickets = game.total_ticket_limit
         tickets_booked = tickets_qs.filter(status="BOOKED").count()
         fullsheet_booked = tickets_qs.filter(ticket_type="FULL_SHEET", status="BOOKED").count()
         halfsheet_booked = tickets_qs.filter(ticket_type="HALF_SHEET", status="BOOKED").count()
@@ -331,6 +504,8 @@ class GameBusinessSummaryView(APIView):
                 "total_prize_money": total_prize_money,
                 "total_revenue": total_revenue,
                 "total_profit": total_profit,
+                "agent_commission": game.agent_commission,
+                "website_status": game.website_status,
             }
         )
 
@@ -346,6 +521,10 @@ class GameSummaryView(APIView):
             "status": game.status,
             "calling_interval": game.calling_interval,
             "booking_status": game.booking_status,
+            "website_status": game.website_status,
+            "total_tickets": game.total_ticket_limit,
+            "ticket_price": game.ticket_price,
+            "agent_commission": game.agent_commission,
         }
 
         prizes = Prize.objects.filter(game=game).order_by("prize_type", "id")

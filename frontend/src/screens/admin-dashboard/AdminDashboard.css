@@ -1,0 +1,461 @@
+.admin-page {
+  min-height: 100vh;
+  padding: 24px 18px 80px;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(255, 40, 40, 0.2) 0, rgba(255, 40, 40, 0) 26%),
+    radial-gradient(circle at 78% 15%, rgba(57, 95, 255, 0.3) 0, rgba(57, 95, 255, 0) 30%),
+    linear-gradient(180deg, #071141 0%, #0c1a6d 55%, #050d36 100%);
+  color: #eef1ff;
+}
+
+.admin-page__header {
+  background: linear-gradient(180deg, #e81f2f 0%, #9b0e16 100%);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.admin-page__header h1 {
+  margin: 0;
+  font-family: 'Bebas Neue', sans-serif;
+  letter-spacing: 1.4px;
+  font-size: 34px;
+}
+
+.admin-page__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin-subnav {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.admin-subnav__item {
+  border: 2px solid #ffe700;
+  border-radius: 8px;
+  background: #08133c;
+  color: #fff;
+  padding: 10px 8px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.admin-subnav__item.active {
+  background: linear-gradient(180deg, #ff1f2d 0%, #b10d18 100%);
+  border-color: #ffd2d6;
+}
+
+.admin-view-banner {
+  background: linear-gradient(180deg, #18267e 0%, #0c1455 100%);
+  border: 2px solid #0b1040;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+  padding: 14px;
+}
+
+.admin-view-banner h2 {
+  margin: 0 0 6px;
+  font-family: 'Bebas Neue', sans-serif;
+  letter-spacing: 1px;
+  font-size: 30px;
+}
+
+.admin-view-banner p {
+  margin: 0;
+  color: #d9e0ff;
+  font-weight: 600;
+}
+
+.admin-select {
+  min-width: 280px;
+  max-width: 100%;
+  border: 2px solid #ffe700;
+  background: #08133c;
+  color: #fff;
+  border-radius: 8px;
+  padding: 10px;
+  font-weight: 700;
+}
+
+.admin-message {
+  background: #0b1b62;
+  border: 2px solid #ffe700;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.admin-message.error {
+  border-color: #ff2d2d;
+}
+
+.admin-card {
+  background: #111b71;
+  border: 2px solid #0d124a;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  margin-bottom: 18px;
+  padding: 14px;
+}
+
+.admin-card h2 {
+  margin: 0 0 12px;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 30px;
+  letter-spacing: 1px;
+}
+
+.kv-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.kv-grid > div {
+  padding: 10px;
+  border-radius: 6px;
+}
+
+.kv-grid > div:nth-child(odd) {
+  background: #090b1c;
+  font-weight: 700;
+}
+
+.kv-grid > div:nth-child(even) {
+  background: #f7f8ff;
+  color: #111;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.form-grid label {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.form-grid input,
+.form-grid select {
+  border: 2px solid #0a0e3d;
+  border-radius: 8px;
+  padding: 10px;
+  font-weight: 600;
+}
+
+.primary-btn,
+.secondary-btn,
+.action-btn,
+.ticket-booker button {
+  border: none;
+  cursor: pointer;
+  border-radius: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.primary-btn {
+  background: linear-gradient(180deg, #ff1f2d 0%, #be101a 100%);
+  color: #fff;
+  padding: 12px 16px;
+}
+
+.secondary-btn {
+  background: #0b0b0b;
+  color: #fff;
+  padding: 12px 16px;
+}
+
+.primary-btn:disabled,
+.secondary-btn:disabled,
+.action-btn:disabled,
+.ticket-booker button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border-radius: 8px;
+}
+
+.table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 660px;
+}
+
+.table-wrap thead th {
+  background: #090909;
+  color: #fff;
+  text-align: left;
+  padding: 10px;
+}
+
+.table-wrap tbody td {
+  background: #f8f8ff;
+  color: #111;
+  padding: 8px 10px;
+  border-bottom: 1px solid #d8dbff;
+}
+
+.table-wrap tbody tr:nth-child(even) td {
+  background: #f0f2ff;
+}
+
+.action-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.action-btn {
+  background: linear-gradient(180deg, #ff1f2d 0%, #b30d18 100%);
+  color: #fff;
+  padding: 12px;
+}
+
+.control-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.control-grid > div {
+  padding: 10px;
+  border-radius: 6px;
+}
+
+.control-grid > div:nth-child(odd) {
+  background: #0a0a0a;
+  font-weight: 700;
+}
+
+.control-grid > div:nth-child(even) {
+  background: #f4f6ff;
+  color: #111;
+}
+
+.control-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.voice-mode-control {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.voice-mode-control label {
+  font-weight: 700;
+}
+
+.voice-mode-control select {
+  border: 2px solid #0a0e3d;
+  border-radius: 8px;
+  padding: 10px;
+  font-weight: 700;
+}
+
+.voice-mode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.voice-unlock-btn {
+  padding: 10px 14px;
+}
+
+.bingo-call-banner {
+  margin: 0 0 10px;
+  border-radius: 10px;
+  border: 2px solid #ffe700;
+  background: linear-gradient(180deg, #ff2b3a 0%, #a60d16 100%);
+  color: #fff;
+  text-align: center;
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: 0.6px;
+  padding: 12px;
+  animation: bingo-pop 260ms ease-out;
+}
+
+.number-board {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 4px;
+  background: #f4f4f4;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.number-board__cell {
+  min-height: 32px;
+  border: 1px solid #c8c8d8;
+  background: #ffffff;
+  color: #101010;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+
+.number-board__cell.called {
+  background: #ffe700;
+  color: #090909;
+  border-color: #e0cb00;
+}
+
+.ticket-toolbar {
+  margin-bottom: 10px;
+}
+
+.ticket-toolbar input {
+  width: 100%;
+  border: 2px solid #0a0e3d;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.ticket-booker {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ticket-booker input {
+  border: 2px solid #0a0e3d;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.ticket-booker select {
+  border: 2px solid #0a0e3d;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.ticket-booker button {
+  background: linear-gradient(180deg, #ff1f2d 0%, #b10d18 100%);
+  color: #fff;
+}
+
+.poster-preview {
+  background: linear-gradient(180deg, #541785 0%, #330f59 80%);
+  border-radius: 10px;
+  padding: 16px;
+  border: 2px solid #f2f2f2;
+  margin-bottom: 12px;
+}
+
+.poster-preview h3 {
+  margin: 0 0 10px;
+  font-family: 'Bebas Neue', sans-serif;
+  letter-spacing: 1px;
+  font-size: 30px;
+}
+
+.poster-preview p {
+  margin: 4px 0;
+}
+
+.poster-preview ul {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.poster-preview li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+@media (max-width: 1024px) {
+  .action-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ticket-booker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-page {
+    padding: 14px 12px 40px;
+  }
+
+  .admin-page__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .admin-page__toolbar {
+    width: 100%;
+  }
+
+  .admin-subnav {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .admin-select {
+    min-width: 100%;
+  }
+
+  .kv-grid,
+  .form-grid,
+  .control-grid,
+  .action-grid,
+  .ticket-booker {
+    grid-template-columns: 1fr;
+  }
+
+  .number-board {
+    grid-template-columns: repeat(9, minmax(0, 1fr));
+  }
+
+  .bingo-call-banner {
+    font-size: 18px;
+    padding: 10px;
+  }
+}
+
+@keyframes bingo-pop {
+  from {
+    transform: scale(0.98);
+    opacity: 0.65;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}

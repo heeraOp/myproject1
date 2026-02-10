@@ -6,6 +6,8 @@ import redis
 from asgiref.sync import async_to_sync
 from celery import shared_task
 from channels.layers import get_channel_layer
+from django.db import transaction
+from django.utils import timezone
 
 from claims.utils.evaluator import evaluate_claims_for_game
 from games.models import Game
@@ -22,6 +24,45 @@ def auto_call_numbers(game_id):
         return
 
     channel_layer = get_channel_layer()
+
+    def finish_game_if_needed() -> bool:
+        """
+        Canonical finish check.
+        - Game already marked FINISHED (e.g. by claim evaluator)
+        - All 90 numbers exhausted
+        Returns True if game should stop.
+        """
+        transitioned_to_finished = False
+        with transaction.atomic():
+            current_game = Game.objects.select_for_update().filter(id=game_id).first()
+            if current_game is None:
+                return True
+
+            if current_game.status == Game.Status.FINISHED:
+                return True
+
+            called_attr = getattr(current_game, "called_numbers", None)
+            if hasattr(called_attr, "values_list"):
+                called_count = called_attr.count()
+            else:
+                called_count = len(set(called_attr or []))
+
+            if called_count >= 90:
+                current_game.status = Game.Status.FINISHED
+                current_game.ended_at = timezone.now()
+                current_game.save(update_fields=["status", "ended_at"])
+                transitioned_to_finished = True
+
+        if transitioned_to_finished:
+            async_to_sync(channel_layer.group_send)(
+                f"game_{str(game_id)}",
+                {
+                    "type": "game_finished",
+                },
+            )
+            return True
+
+        return False
 
     try:
         while True:
@@ -40,8 +81,7 @@ def auto_call_numbers(game_id):
                 try:
                     number = call_next_number(game)
                 except RuntimeError:
-                    game.status = Game.Status.FINISHED
-                    game.save(update_fields=["status"])
+                    finish_game_if_needed()
                     return
                 except ValueError:
                     return
@@ -50,14 +90,12 @@ def auto_call_numbers(game_id):
                 called_list = list(called_attr or [])
                 called_set = set(called_list)
                 if len(called_set) >= 90:
-                    game.status = Game.Status.FINISHED
-                    game.save(update_fields=["status"])
+                    finish_game_if_needed()
                     return
 
                 remaining = [n for n in range(1, 91) if n not in called_set]
                 if not remaining:
-                    game.status = Game.Status.FINISHED
-                    game.save(update_fields=["status"])
+                    finish_game_if_needed()
                     return
 
                 number = random.choice(remaining)
@@ -78,6 +116,10 @@ def auto_call_numbers(game_id):
             )
 
             evaluate_claims_for_game(game)
+
+            # Stop immediately once canonical finish conditions are met.
+            if finish_game_if_needed():
+                return
 
             interval = game.calling_interval or 1
             redis_client.set(lock_key, lock_value, ex=max(5, int(interval) * 2), xx=True)

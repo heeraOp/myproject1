@@ -1,0 +1,101 @@
+.list-shell {
+  min-height: 100vh;
+  padding: 20px 16px 50px;
+  background: linear-gradient(180deg, #1b2cff 0%, #0a146e 60%, #070d43 100%);
+  color: #fff;
+}
+
+.list-header {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 30px;
+  text-align: center;
+  padding: 14px 10px;
+  background: #1623aa;
+  border-radius: 8px;
+  margin-bottom: 14px;
+}
+
+.list-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tab {
+  flex: 1;
+  padding: 10px;
+  border-radius: 10px;
+  border: none;
+  background: #050505;
+  color: #fff;
+  font-weight: 700;
+}
+
+.tab.active {
+  background: #ff1f2d;
+}
+
+.search-input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 2px solid #0a0f3f;
+  margin-bottom: 14px;
+}
+
+.list-table {
+  background: #f0f2ff;
+  color: #111;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.list-head,
+.list-row {
+  display: grid;
+  grid-template-columns: 0.5fr 1.2fr 1.2fr 0.6fr;
+  gap: 6px;
+  padding: 10px 12px;
+  align-items: center;
+}
+
+.list-head {
+  background: #0b0b0b;
+  color: #fff;
+  font-weight: 700;
+}
+
+.list-row {
+  background: #fff;
+  border-bottom: 2px solid #b1b6ff;
+  font-weight: 600;
+}
+
+.list-row:last-child {
+  border-bottom: none;
+}
+
+.list-row .edit {
+  text-align: center;
+  color: #1b43ff;
+  font-weight: 800;
+}
+
+.book-ticket {
+  margin-top: 14px;
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 10px;
+  background: #ff1f2d;
+  color: #fff;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .list-head,
+  .list-row {
+    grid-template-columns: 0.6fr 1.4fr 1.4fr 0.6fr;
+  }
+}

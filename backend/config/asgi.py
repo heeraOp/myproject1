@@ -7,8 +7,6 @@ from games.routing import websocket_urlpatterns
 application = ProtocolTypeRouter({
     "http": get_asgi_application(),
     "websocket": AuthMiddlewareStack(
-        URLRouter([
-            path("ws/", URLRouter(websocket_urlpatterns)),
-        ])
+        URLRouter(websocket_urlpatterns)
     ),
 })

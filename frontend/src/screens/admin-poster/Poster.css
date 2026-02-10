@@ -1,0 +1,74 @@
+.poster-shell {
+  min-height: 100vh;
+  padding: 24px 16px 40px;
+  background: radial-gradient(circle at top, #5a2b99 0%, #2b0e4f 55%, #120623 100%);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.poster-card {
+  width: min(420px, 100%);
+  background: linear-gradient(180deg, #5d1b82 0%, #3b0f57 60%, #2a0b3d 100%);
+  border: 6px solid #f2f2f2;
+  padding: 22px 18px;
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.poster-title {
+  font-family: 'Bebas Neue', sans-serif;
+  letter-spacing: 1px;
+  font-size: 24px;
+  border: 3px solid #ff2b2b;
+  padding: 10px 8px;
+  margin-bottom: 8px;
+}
+
+.poster-subtitle {
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: #ffb347;
+}
+
+.poster-highlight {
+  background: #a45cf5;
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-weight: 700;
+}
+
+.poster-prizes {
+  margin: 14px 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.poster-footer {
+  font-size: 12px;
+  margin-top: 12px;
+  color: #e6d7ff;
+}
+
+.poster-contact {
+  font-size: 12px;
+  margin-top: 10px;
+  color: #e6d7ff;
+}
+
+.print-button {
+  width: min(420px, 100%);
+  padding: 14px;
+  border: none;
+  border-radius: 8px;
+  background: #ff1f2d;
+  color: #fff;
+  font-weight: 700;
+}

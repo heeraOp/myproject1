@@ -36,3 +36,15 @@ by game:(get)http://127.0.0.1:8000/api/tickets/game/<game_id>/
 
 by ticket:(get) /api/tickets/game/<game_id>/12/ticketno(1....)
 
+####### Prize configuration (Admin only, earlier step)
+POST /api/claims/admin/prizes/
+POST /api/claims/admin/evaluate/
+
+########
+POST /api/games/admin/<game_id>/start/
+POST /api/games/admin/<game_id>/pause/
+POST /api/games/admin/<game_id>/resume/
+POST /api/games/admin/<GAME_ID>/start/
+{
+  "calling_interval": 1
+}

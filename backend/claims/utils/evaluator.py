@@ -135,7 +135,10 @@ def evaluate_claims_for_game(game):
                 },
             )
 
-            if _normalize_prize_type(prize.prize_type) in ("FULL_HOUSE", "FULL_SHEET"):
+            if (
+                _normalize_prize_type(prize.prize_type) in ("FULL_HOUSE", "FULL_SHEET")
+                and game.status != game.Status.FINISHED
+            ):
                 game.status = game.Status.FINISHED
                 game.save(update_fields=["status"])
                 async_to_sync(channel_layer.group_send)(

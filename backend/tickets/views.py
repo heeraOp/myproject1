@@ -2,6 +2,8 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -11,21 +13,86 @@ from .models import Ticket
 from .serializers import (
     AdminBulkTicketGenerateSerializer,
     AdminTicketBookingSerializer,
+    PublicTicketSerializer,
     PlayerTicketSerializer,
 )
 from .utils.generator import generate_housie_ticket
 
 
+def _pick_contiguous_block(open_numbers, required_count):
+    """
+    Pick the first contiguous block of size `required_count`.
+    Returns [] if no contiguous block exists.
+    """
+    if required_count <= 1:
+        return open_numbers[:1]
+    if len(open_numbers) < required_count:
+        return []
+
+    for start_index in range(0, len(open_numbers) - required_count + 1):
+        block = open_numbers[start_index : start_index + required_count]
+        if all(block[idx] + 1 == block[idx + 1] for idx in range(required_count - 1)):
+            return block
+    return []
+
+
+def _pick_best_open_ticket_numbers(open_numbers, booking_mode, required_count):
+    """
+    Smart auto-allocation strategy:
+    - RANDOM: first available open ticket (stable and race-safe).
+    - HALF/FULL: prefer contiguous ticket blocks for sheet-style booking.
+      fallback: earliest available open tickets.
+    """
+    if len(open_numbers) < required_count:
+        return []
+
+    if booking_mode == "RANDOM":
+        return open_numbers[:1]
+
+    contiguous = _pick_contiguous_block(open_numbers, required_count)
+    if contiguous:
+        return contiguous
+
+    return open_numbers[:required_count]
+
+
+class IsAdminRole(BasePermission):
+    """
+    Admin-only permission based on user role or staff/superuser flags.
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if getattr(user, "role", None) == "ADMIN":
+            return True
+        return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+
+
+class CsrfExemptSessionAuthentication(SessionAuthentication):
+    """
+    Session auth without CSRF enforcement (for API clients like Postman).
+    """
+
+    def enforce_csrf(self, request):
+        return
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class AdminTicketBookingView(APIView):
-    authentication_classes = []
+    permission_classes = [IsAdminRole]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
     def post(self, request):
         serializer = AdminTicketBookingSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=400)
 
         game_id = serializer.validated_data["game_id"]
-        ticket_number = serializer.validated_data["ticket_number"]
+        ticket_number = serializer.validated_data.get("ticket_number")
+        ticket_numbers = serializer.validated_data.get("ticket_numbers") or []
+        booking_mode = serializer.validated_data.get("booking_mode", "RANDOM")
         player_name = serializer.validated_data["player_name"]
         player_phone = serializer.validated_data["player_phone"]
 
@@ -37,25 +104,71 @@ class AdminTicketBookingView(APIView):
         if game.booking_status != Game.BookingStatus.OPEN:
             return Response({"detail": "Ticket booking is closed for this game."}, status=400)
 
+        required_count = 1
+        booking_ticket_type = Ticket.TicketType.RANDOM
+        if booking_mode == "HALF_SHEET":
+            required_count = 3
+            booking_ticket_type = Ticket.TicketType.HALF_SHEET
+        elif booking_mode == "FULL_SHEET":
+            required_count = 6
+            booking_ticket_type = Ticket.TicketType.FULL_SHEET
+
+        if ticket_numbers:
+            selected_numbers = sorted(set(ticket_numbers))
+        elif ticket_number is not None:
+            selected_numbers = [ticket_number]
+        else:
+            selected_numbers = []
+
         with transaction.atomic():
-            try:
-                ticket = Ticket.objects.select_for_update().get(game=game, ticket_number=ticket_number)
-            except Ticket.DoesNotExist:
-                return Response({"detail": "Ticket not found."}, status=404)
+            open_numbers = list(
+                Ticket.objects.select_for_update()
+                .filter(game=game, status=Ticket.Status.OPEN)
+                .order_by("ticket_number")
+                .values_list("ticket_number", flat=True)
+            )
 
-            if ticket.status != Ticket.Status.OPEN:
-                return Response({"detail": "Ticket is already booked."}, status=400)
+            if not selected_numbers:
+                selected_numbers = _pick_best_open_ticket_numbers(
+                    open_numbers=open_numbers,
+                    booking_mode=booking_mode,
+                    required_count=required_count,
+                )
 
-            if ticket.player_name or ticket.player_phone:
-                return Response({"detail": "Ticket is already assigned."}, status=400)
+            if len(open_numbers) < required_count:
+                return Response({"detail": "Not enough open tickets available."}, status=400)
 
-            ticket.player_name = player_name
-            ticket.player_phone = player_phone
-            ticket.status = Ticket.Status.BOOKED
-            ticket.booked_at = timezone.now()
-            ticket.save()
+            if booking_mode == "RANDOM" and len(selected_numbers) != 1:
+                return Response({"detail": "RANDOM booking requires exactly one ticket."}, status=400)
 
-        return Response(
+            if booking_mode != "RANDOM" and len(selected_numbers) != required_count:
+                return Response(
+                    {"detail": f"{booking_mode} booking requires {required_count} tickets."},
+                    status=400,
+                )
+
+            tickets = list(
+                Ticket.objects.select_for_update()
+                .filter(game=game, ticket_number__in=selected_numbers)
+                .order_by("ticket_number")
+            )
+            if len(tickets) != len(selected_numbers):
+                return Response({"detail": "One or more tickets not found."}, status=404)
+
+            for ticket in tickets:
+                if ticket.status != Ticket.Status.OPEN or ticket.player_name or ticket.player_phone:
+                    return Response({"detail": f"Ticket {ticket.ticket_number} is already booked."}, status=400)
+
+            now = timezone.now()
+            for ticket in tickets:
+                ticket.player_name = player_name
+                ticket.player_phone = player_phone
+                ticket.status = Ticket.Status.BOOKED
+                ticket.booked_at = now
+                ticket.ticket_type = booking_ticket_type
+                ticket.save()
+
+        booked_payloads = [
             {
                 "id": str(ticket.id),
                 "game_id": str(ticket.game_id),
@@ -66,12 +179,19 @@ class AdminTicketBookingView(APIView):
                 "player_phone": ticket.player_phone,
                 "booked_at": ticket.booked_at,
             }
-        )
+            for ticket in tickets
+        ]
+
+        primary = booked_payloads[0]
+        primary["booked_tickets"] = booked_payloads
+        primary["total_booked"] = len(booked_payloads)
+        return Response(primary)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
 class AdminBulkTicketGenerateView(APIView):
-    authentication_classes = []
+    permission_classes = [IsAdminRole]
+    authentication_classes = [CsrfExemptSessionAuthentication]
 
     def post(self, request):
         serializer = AdminBulkTicketGenerateSerializer(data=request.data)
@@ -122,6 +242,26 @@ class PlayerTicketListView(APIView):
 
         tickets = Ticket.objects.filter(game=game).order_by("ticket_number")
         serializer = PlayerTicketSerializer(tickets, many=True)
+        return Response(serializer.data)
+
+
+class PublicTicketListView(APIView):
+    authentication_classes = []
+
+    def get(self, request, game_id):
+        try:
+            game = Game.objects.get(id=game_id)
+        except Game.DoesNotExist:
+            return Response({"detail": "Game not found."}, status=404)
+
+        tickets = Ticket.objects.filter(game=game).order_by("ticket_number")
+        # Only mark ownership for the requesting player; never expose others.
+        viewer_phone = request.query_params.get("player_phone")
+        serializer = PublicTicketSerializer(
+            tickets,
+            many=True,
+            context={"viewer_phone": viewer_phone},
+        )
         return Response(serializer.data)
 
 
