@@ -78,6 +78,43 @@ class GameWinnersView(APIView):
         return Response(WinnerSerializer(winners, many=True).data)
 
 
+def _serialize_prize(prize):
+    return {
+        "prize_type": prize.prize_type,
+        "amount": prize.amount,
+        "enabled": prize.enabled,
+        "claimed": prize.is_claimed,
+    }
+
+
+def _parse_amount(value, prize_type):
+    try:
+        amount = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid amount for {prize_type}") from exc
+
+    if amount < 0:
+        raise ValueError(f"Amount cannot be negative for {prize_type}")
+
+    return amount
+
+
+def _parse_enabled(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    raise ValueError("enabled must be a boolean value.")
+
+
 class PrizeListUpdateView(APIView):
     def get_permissions(self):
         if self.request.method == "GET":
@@ -93,17 +130,67 @@ class PrizeListUpdateView(APIView):
             return Response({"detail": "Game not found."}, status=404)
 
         prizes = Prize.objects.filter(game=game).order_by("prize_type", "id")
-        data = []
-        for prize in prizes:
-            data.append(
-                {
-                    "prize_type": prize.prize_type,
-                    "amount": prize.amount,
-                    "enabled": prize.enabled,
-                    "claimed": prize.is_claimed,
-                }
+        return Response([_serialize_prize(prize) for prize in prizes])
+
+    def post(self, request, game_id):
+        try:
+            game = Game.objects.get(id=game_id)
+        except Game.DoesNotExist:
+            return Response({"detail": "Game not found."}, status=404)
+
+        if game.status == Game.Status.RUNNING:
+            return Response({"detail": "Cannot configure prizes while game is RUNNING."}, status=400)
+
+        payload = request.data
+        if isinstance(payload, dict):
+            payload = [payload]
+        if not isinstance(payload, list) or not payload:
+            return Response({"detail": "Expected a non-empty list of prizes."}, status=400)
+
+        valid_types = {choice[0] for choice in Prize.PrizeType.choices}
+        created = []
+        existing = []
+        seen_types = set()
+
+        for item in payload:
+            if not isinstance(item, dict):
+                return Response({"detail": "Each prize payload item must be an object."}, status=400)
+
+            prize_type = str(item.get("prize_type", "")).strip().upper()
+            if prize_type not in valid_types:
+                return Response({"detail": f"Invalid prize_type: {prize_type}"}, status=400)
+
+            if prize_type in seen_types:
+                return Response({"detail": f"Duplicate prize_type in request: {prize_type}"}, status=400)
+            seen_types.add(prize_type)
+
+            try:
+                amount = _parse_amount(item.get("amount", 0), prize_type)
+                enabled = _parse_enabled(item.get("enabled"), default=False)
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=400)
+
+            prize, was_created = Prize.objects.get_or_create(
+                game=game,
+                prize_type=prize_type,
+                defaults={
+                    "amount": amount,
+                    "enabled": enabled,
+                },
             )
-        return Response(data)
+            if was_created:
+                created.append(_serialize_prize(prize))
+            else:
+                existing.append(_serialize_prize(prize))
+
+        return Response(
+            {
+                "detail": f"Created {len(created)} prize(s).",
+                "created": created,
+                "existing": existing,
+            },
+            status=201 if created else 200,
+        )
 
     def put(self, request, game_id):
         try:
@@ -127,11 +214,10 @@ class PrizeListUpdateView(APIView):
                 return Response({"detail": f"Invalid prize_type: {prize_type}"}, status=400)
 
             try:
-                amount = int(item.get("amount"))
-            except (TypeError, ValueError):
-                return Response({"detail": f"Invalid amount for {prize_type}"}, status=400)
-
-            enabled = bool(item.get("enabled", False))
+                amount = _parse_amount(item.get("amount"), prize_type)
+                enabled = _parse_enabled(item.get("enabled"), default=False)
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=400)
 
             prize, _ = Prize.objects.update_or_create(
                 game=game,
@@ -141,14 +227,7 @@ class PrizeListUpdateView(APIView):
                     "enabled": enabled,
                 },
             )
-            updated.append(
-                {
-                    "prize_type": prize.prize_type,
-                    "amount": prize.amount,
-                    "enabled": prize.enabled,
-                    "claimed": prize.is_claimed,
-                }
-            )
+            updated.append(_serialize_prize(prize))
 
         return Response(updated)
 
@@ -164,6 +243,73 @@ class PrizeTypeListView(APIView):
         return Response(
             [{"prize_type": choice[0], "label": choice[1]} for choice in Prize.PrizeType.choices]
         )
+
+
+class PrizeDetailUpdateView(APIView):
+    permission_classes = [IsAdminRole]
+
+    def patch(self, request, game_id, prize_type):
+        try:
+            game = Game.objects.get(id=game_id)
+        except Game.DoesNotExist:
+            return Response({"detail": "Game not found."}, status=404)
+
+        if game.status == Game.Status.RUNNING:
+            return Response({"detail": "Cannot update prizes while game is RUNNING."}, status=400)
+
+        normalized_type = str(prize_type).strip().upper()
+        valid_types = {choice[0] for choice in Prize.PrizeType.choices}
+        if normalized_type not in valid_types:
+            return Response({"detail": f"Invalid prize_type: {normalized_type}"}, status=400)
+
+        prizes_qs = Prize.objects.filter(game=game, prize_type=normalized_type).order_by("id")
+        prize = prizes_qs.first()
+        if prize is None:
+            return Response({"detail": "Prize not found for this game."}, status=404)
+
+        update_fields = {}
+        if "amount" in request.data:
+            try:
+                update_fields["amount"] = _parse_amount(request.data.get("amount"), normalized_type)
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=400)
+
+        if "enabled" in request.data:
+            try:
+                update_fields["enabled"] = _parse_enabled(request.data.get("enabled"), default=False)
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=400)
+
+        if not update_fields:
+            return Response({"detail": "Provide at least one of: amount, enabled."}, status=400)
+
+        prizes_qs.update(**update_fields)
+        prize.refresh_from_db()
+        return Response(_serialize_prize(prize))
+
+    def delete(self, request, game_id, prize_type):
+        try:
+            game = Game.objects.get(id=game_id)
+        except Game.DoesNotExist:
+            return Response({"detail": "Game not found."}, status=404)
+
+        if game.status == Game.Status.RUNNING:
+            return Response({"detail": "Cannot update prizes while game is RUNNING."}, status=400)
+
+        normalized_type = str(prize_type).strip().upper()
+        valid_types = {choice[0] for choice in Prize.PrizeType.choices}
+        if normalized_type not in valid_types:
+            return Response({"detail": f"Invalid prize_type: {normalized_type}"}, status=400)
+
+        prizes_qs = Prize.objects.filter(game=game, prize_type=normalized_type)
+        if not prizes_qs.exists():
+            return Response({"detail": "Prize not found for this game."}, status=404)
+
+        if prizes_qs.filter(is_claimed=True).exists():
+            return Response({"detail": "Cannot remove a claimed prize."}, status=400)
+
+        deleted_count, _ = prizes_qs.delete()
+        return Response({"detail": "Prize removed.", "deleted": deleted_count})
 
 
 class ClaimSubmitView(APIView):

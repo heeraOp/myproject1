@@ -3,7 +3,10 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { fetchPublicGames } from '@/api/rest/games'
 import {
   bookTicket,
+  createGamePrizes,
+  deleteGamePrize,
   getGameBusinessSummary,
+  getPrizeTypes,
   getGameState,
   getGameSummary,
   getPrizes,
@@ -17,8 +20,9 @@ import {
   saveGameSettings,
   startGame,
   updateActiveTheme,
-  updatePrizes,
+  updateGamePrize,
   type GameBusinessSummaryResponse,
+  type PrizeTypeResponse,
   type GameSummaryResponse,
   type PrizeResponse,
   type TicketResponse,
@@ -57,23 +61,14 @@ type BookingForm = {
   playerPhone: string
 }
 
-// Frontend-only default dividends (no backend dependency).
-const DEFAULT_DIVIDENDS: PrizeResponse[] = [
-  { prize_type: 'FIRST_HOUSE', amount: 0, enabled: true, claimed: false },
-  { prize_type: 'SECOND_HOUSE', amount: 0, enabled: true, claimed: false },
-  { prize_type: 'THIRD_HOUSE', amount: 0, enabled: true, claimed: false },
-  { prize_type: 'FULL_SHEET', amount: 0, enabled: true, claimed: false },
-  { prize_type: 'HALF_SHEET', amount: 0, enabled: true, claimed: false },
-  { prize_type: 'TOP_LINE', amount: 0, enabled: true, claimed: false },
-  { prize_type: 'MIDDLE_LINE', amount: 0, enabled: true, claimed: false },
-  { prize_type: 'BOTTOM_LINE', amount: 0, enabled: true, claimed: false },
-  { prize_type: 'BOX', amount: 0, enabled: true, claimed: false },
-  { prize_type: 'CORNER', amount: 0, enabled: true, claimed: false },
-  { prize_type: 'STAR', amount: 0, enabled: true, claimed: false },
-  { prize_type: 'EARLY_5', amount: 0, enabled: true, claimed: false },
-  { prize_type: 'QUICK_6', amount: 0, enabled: true, claimed: false },
-  { prize_type: 'QUICK_7', amount: 0, enabled: true, claimed: false },
-]
+type PrizeSetupRow = {
+  prize_type: string
+  label: string
+  amount: number
+  enabled: boolean
+  claimed: boolean
+  configured: boolean
+}
 
 const CLAIM_MONITOR_ORDER = [
   { prizeType: 'FIRST_HOUSE', label: 'First Full House' },
@@ -102,6 +97,47 @@ const PRIZE_LABEL_MAP: Record<string, string> = {
   EARLY_5: 'Early 5',
   QUICK_6: 'Quick 6',
   QUICK_7: 'Quick 7',
+}
+
+const FALLBACK_PRIZE_TYPES: PrizeTypeResponse[] = Object.entries(PRIZE_LABEL_MAP).map(
+  ([prize_type, label]) => ({
+    prize_type,
+    label,
+  }),
+)
+
+const buildPrizeSetupRows = (
+  prizeTypes: PrizeTypeResponse[],
+  configuredPrizes: PrizeResponse[],
+): PrizeSetupRow[] => {
+  const types = prizeTypes.length > 0 ? prizeTypes : FALLBACK_PRIZE_TYPES
+  const existingByType = new Map(configuredPrizes.map((prize) => [prize.prize_type, prize]))
+  const typeSet = new Set(types.map((type) => type.prize_type))
+  const rows = types.map((type) => {
+    const existing = existingByType.get(type.prize_type)
+    return {
+      prize_type: type.prize_type,
+      label: type.label || PRIZE_LABEL_MAP[type.prize_type] || type.prize_type,
+      amount: existing?.amount ?? 0,
+      enabled: existing?.enabled ?? false,
+      claimed: existing?.claimed ?? false,
+      configured: Boolean(existing),
+    }
+  })
+
+  configuredPrizes.forEach((prize) => {
+    if (typeSet.has(prize.prize_type)) return
+    rows.push({
+      prize_type: prize.prize_type,
+      label: PRIZE_LABEL_MAP[prize.prize_type] || prize.prize_type,
+      amount: prize.amount,
+      enabled: prize.enabled,
+      claimed: prize.claimed,
+      configured: true,
+    })
+  })
+
+  return rows
 }
 
 const getErrorMessage = (error: unknown): string => {
@@ -156,8 +192,10 @@ const AdminDashboard = () => {
   const [gameId, setGameId] = useState<string>('')
   const [summary, setSummary] = useState<GameSummaryResponse | null>(null)
   const [business, setBusiness] = useState<GameBusinessSummaryResponse | null>(null)
-  const [prizes, setPrizes] = useState<PrizeResponse[]>(DEFAULT_DIVIDENDS)
-  const [editablePrizes, setEditablePrizes] = useState<PrizeResponse[]>(DEFAULT_DIVIDENDS)
+  const [prizeTypes, setPrizeTypes] = useState<PrizeTypeResponse[]>([])
+  const [prizeTypesLoading, setPrizeTypesLoading] = useState(false)
+  const [prizes, setPrizes] = useState<PrizeResponse[]>([])
+  const [editablePrizes, setEditablePrizes] = useState<PrizeSetupRow[]>([])
   const [tickets, setTickets] = useState<TicketResponse[]>([])
   const [winners, setWinners] = useState<WinnerResponse[]>([])
   const [loading, setLoading] = useState(false)
@@ -233,7 +271,9 @@ const AdminDashboard = () => {
   const voiceMode = useVoiceModeStore((state) => state.mode)
   const setVoiceMode = useVoiceModeStore((state) => state.setMode)
   const normalizedPath = location.pathname.replace(/\/+$/, '')
-  const activeView: 'main' | 'run' | 'book' | 'list' | 'poster' = normalizedPath.endsWith('/run')
+  const activeView: 'main' | 'run' | 'book' | 'list' | 'poster' | 'prizes' = normalizedPath.endsWith(
+    '/run',
+  )
     ? 'run'
     : normalizedPath.endsWith('/book')
       ? 'book'
@@ -241,6 +281,8 @@ const AdminDashboard = () => {
         ? 'list'
         : normalizedPath.endsWith('/poster')
           ? 'poster'
+          : normalizedPath.endsWith('/prizes')
+            ? 'prizes'
           : 'main'
   const viewTitleMap: Record<typeof activeView, string> = {
     main: 'Main Dashboard',
@@ -248,17 +290,43 @@ const AdminDashboard = () => {
     book: 'Ticket Booking',
     list: 'History & Reports',
     poster: 'Poster & Dividend',
+    prizes: 'Configure Prizes',
   }
   const routeTabs = [
     { key: 'main' as const, label: 'Dashboard', path: '/admin' },
     { key: 'run' as const, label: 'Run', path: '/admin/run' },
     { key: 'book' as const, label: 'Book', path: '/admin/book' },
     { key: 'list' as const, label: 'List', path: '/admin/list' },
+    { key: 'prizes' as const, label: 'Prizes', path: '/admin/prizes' },
     { key: 'poster' as const, label: 'Poster', path: '/admin/poster' },
   ]
 
   // Real-time stream for called numbers and winner announcements.
   useGameSocket(gameId || undefined)
+
+  useEffect(() => {
+    let mounted = true
+    const loadPrizeTypes = async () => {
+      setPrizeTypesLoading(true)
+      try {
+        const types = await getPrizeTypes()
+        if (!mounted) return
+        setPrizeTypes(Array.isArray(types) ? types : [])
+      } catch {
+        if (!mounted) return
+        // Keep local fallback labels so prize setup remains usable.
+        setPrizeTypes([])
+      } finally {
+        if (mounted) {
+          setPrizeTypesLoading(false)
+        }
+      }
+    }
+    void loadPrizeTypes()
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   const refreshSummaryAndState = useCallback(async (selectedGameId: string) => {
     const [summaryData, stateData] = await Promise.all([
@@ -285,11 +353,7 @@ const AdminDashboard = () => {
         ])
 
         setBusiness(businessData)
-        // Only apply backend prize data when it exists; otherwise keep defaults.
-        if (Array.isArray(prizesData) && prizesData.length > 0) {
-          setPrizes(prizesData)
-          setEditablePrizes(prizesData)
-        }
+        setPrizes(Array.isArray(prizesData) ? prizesData : [])
         setTickets(ticketsData)
         setWinners(winnersData)
 
@@ -347,6 +411,10 @@ const AdminDashboard = () => {
   }, [gameId, loadAll])
 
   useEffect(() => {
+    setEditablePrizes(buildPrizeSetupRows(prizeTypes, prizes))
+  }, [prizeTypes, prizes])
+
+  useEffect(() => {
     if (!gameId) return
     // Sync ticket list when bookings happen from another session/device.
     const unsubscribe = socketManager.subscribe('ticket.booked', async () => {
@@ -391,11 +459,26 @@ const AdminDashboard = () => {
   const running = effectiveStatus === 'RUNNING'
   const finished = effectiveStatus === 'FINISHED'
   const allNumbersCalled = calledNumbers.length >= 90 || summary?.game.status === 'FINISHED'
+  const configuredPrizeCount = prizes.length
+  const enabledPrizeCount = prizes.filter((prize) => prize.enabled).length
+  const hasEnabledPrize = enabledPrizeCount > 0
+  const runControlLabel =
+    summary?.game.status === 'RUNNING'
+      ? 'Pause Game'
+      : summary?.game.status === 'PAUSED'
+        ? 'Resume Game'
+        : 'Run Game'
+  const runControlNeedsEnabledPrize =
+    summary?.game.status === 'CREATED' || summary?.game.status === 'PAUSED'
+  const runControlDisabled =
+    !gameId || !summary || finished || (runControlNeedsEnabledPrize && !hasEnabledPrize)
+  const canEditPrizeConfig = Boolean(gameId) && summary?.game.status !== 'RUNNING'
   const resetActionsAllowedAtEnd = new Set(['reset-call', 'reset-ticket', 'reset-agent', 'backup-ticket'])
   const showOverview = activeView === 'main'
   const showRunView = activeView === 'main' || activeView === 'run'
   const showBookView = activeView === 'main' || activeView === 'book'
   const showListView = activeView === 'main' || activeView === 'list'
+  const showPrizeView = activeView === 'main' || activeView === 'prizes'
   const showPosterView = activeView === 'main' || activeView === 'poster'
 
   const filteredTickets = useMemo(() => {
@@ -481,15 +564,48 @@ const AdminDashboard = () => {
     setSavingPrizes(true)
     setActionMessage('')
     try {
-      const payload = editablePrizes.map((prize) => ({
-        prize_type: prize.prize_type,
-        amount: Number(prize.amount),
-        enabled: Boolean(prize.enabled),
-      }))
-      const updated = await updatePrizes(gameId, payload)
+      const existingByType = new Map(prizes.map((prize) => [prize.prize_type, prize]))
+      const selectedRows = editablePrizes.filter((row) => row.configured)
+
+      const newPrizePayload = selectedRows
+        .filter((row) => !existingByType.has(row.prize_type))
+        .map((row) => ({
+          prize_type: row.prize_type,
+          amount: Math.max(0, Number(row.amount) || 0),
+          enabled: Boolean(row.enabled),
+        }))
+
+      if (newPrizePayload.length > 0) {
+        await createGamePrizes(gameId, newPrizePayload)
+      }
+
+      const patchRequests: Array<Promise<unknown>> = []
+
+      selectedRows.forEach((row) => {
+        if (!existingByType.has(row.prize_type) || row.claimed) return
+        patchRequests.push(
+          updateGamePrize(gameId, row.prize_type, {
+            amount: Math.max(0, Number(row.amount) || 0),
+            enabled: Boolean(row.enabled),
+          }),
+        )
+      })
+
+      editablePrizes.forEach((row) => {
+        if (!existingByType.has(row.prize_type) || row.claimed) return
+        if (row.configured) return
+        patchRequests.push(
+          deleteGamePrize(gameId, row.prize_type),
+        )
+      })
+
+      if (patchRequests.length > 0) {
+        await Promise.all(patchRequests)
+      }
+
+      const updated = await getPrizes(gameId)
       setPrizes(updated)
-      setEditablePrizes(updated)
-      setActionMessage('Prizes saved.')
+      setActionMessage('Prize configuration saved.')
     } catch (saveError) {
       setActionMessage(getErrorMessage(saveError))
     } finally {
@@ -499,7 +615,7 @@ const AdminDashboard = () => {
 
   const generatePosterPdf = () => {
     // Poster-only logic: build a PDF from existing dividend state (no API calls).
-    const enabledPrizes = editablePrizes.filter((prize) => prize.enabled)
+    const enabledPrizes = prizes.filter((prize) => prize.enabled)
     const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
     const pageWidth = doc.internal.pageSize.getWidth()
     const pageHeight = doc.internal.pageSize.getHeight()
@@ -555,6 +671,10 @@ const AdminDashboard = () => {
 
   const handleRunControl = async () => {
     if (!gameId || !summary) return
+    if (runControlNeedsEnabledPrize && !hasEnabledPrize) {
+      setActionMessage('Configure and enable at least one prize before starting or resuming the game.')
+      return
+    }
     setActionMessage('')
     try {
       if (summary.game.status === 'CREATED') {
@@ -568,7 +688,12 @@ const AdminDashboard = () => {
       setSummary(latestSummary)
       setActionMessage('Game control updated.')
     } catch (actionError) {
-      setActionMessage(getErrorMessage(actionError))
+      const message = getErrorMessage(actionError)
+      if (message.toLowerCase().includes('configure at least one prize')) {
+        setActionMessage('Cannot start/resume: configure and enable at least one prize first.')
+      } else {
+        setActionMessage(message)
+      }
     }
   }
 
@@ -637,9 +762,8 @@ const AdminDashboard = () => {
     setGameId('')
     setSummary(null)
     setBusiness(null)
-    // Keep default dividends on reset; do not clear to empty.
-    setPrizes(DEFAULT_DIVIDENDS)
-    setEditablePrizes(DEFAULT_DIVIDENDS)
+    setPrizes([])
+    setEditablePrizes([])
     setTickets([])
     setWinners([])
     setError('')
@@ -816,6 +940,7 @@ const AdminDashboard = () => {
             {activeView === 'run' && 'Live calling operations, call board, and claim monitoring.'}
             {activeView === 'book' && 'Ticket loading, assignment, and booking workflow.'}
             {activeView === 'list' && 'Winner history, ticket history, and business metrics.'}
+            {activeView === 'prizes' && 'Configure prize types, amount, and enablement before game start.'}
             {activeView === 'poster' && 'Dividend setup and poster generation preview.'}
           </p>
         </div>
@@ -923,75 +1048,126 @@ const AdminDashboard = () => {
         </section>
       )}
 
-      {/* Always render Dividend / Prize Settings so it never disappears behind view logic. */}
-      <section className="admin-card">
-        <h2>Dividend / Prize Settings</h2>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Prize type</th>
-                <th>Amount</th>
-                <th>Enabled</th>
-                <th>Claimed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {editablePrizes.length === 0 ? (
+      {showPrizeView && (
+        <section className="admin-card">
+          <h2>Configure Prizes</h2>
+          {!gameId && (
+            <div className="prize-setup-state neutral">Select a game first, then configure prizes.</div>
+          )}
+          {gameId && configuredPrizeCount === 0 && (
+            <div className="prize-setup-state warning">
+              No prizes configured. Select at least one prize type and save.
+            </div>
+          )}
+          {gameId && configuredPrizeCount > 0 && enabledPrizeCount === 0 && (
+            <div className="prize-setup-state warning">
+              Prizes are configured but none are enabled. Enable at least one prize to start or resume.
+            </div>
+          )}
+          {gameId && enabledPrizeCount > 0 && (
+            <div className="prize-setup-state ready">
+              Ready to start game: {enabledPrizeCount} prize{enabledPrizeCount === 1 ? '' : 's'} enabled.
+            </div>
+          )}
+          <div className="table-wrap">
+            <table>
+              <thead>
                 <tr>
-                  <td colSpan={4}>No dividend set.</td>
+                  <th>Configure</th>
+                  <th>Prize type</th>
+                  <th>Amount</th>
+                  <th>Enabled</th>
+                  <th>Status</th>
                 </tr>
-              ) : (
-                editablePrizes.map((prize) => (
-                  <tr key={prize.prize_type}>
-                    <td>{PRIZE_LABEL_MAP[prize.prize_type] ?? prize.prize_type}</td>
-                    <td>
-                      <input
-                        type="number"
-                        value={prize.amount}
-                        disabled={prize.claimed}
-                        onChange={(event) =>
-                          setEditablePrizes((state) =>
-                            state.map((item) =>
-                              item.prize_type === prize.prize_type
-                                ? { ...item, amount: Number(event.target.value) }
-                                : item,
-                            ),
-                          )
-                        }
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={prize.enabled}
-                        disabled={prize.claimed}
-                        onChange={(event) =>
-                          setEditablePrizes((state) =>
-                            state.map((item) =>
-                              item.prize_type === prize.prize_type
-                                ? { ...item, enabled: event.target.checked }
-                                : item,
-                            ),
-                          )
-                        }
-                      />
-                    </td>
-                    <td>{prize.claimed ? 'LOCKED' : 'OPEN'}</td>
+              </thead>
+              <tbody>
+                {editablePrizes.length === 0 ? (
+                  <tr>
+                    <td colSpan={5}>{prizeTypesLoading ? 'Loading prize types...' : 'No prize types found.'}</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        <button onClick={handleSavePrizes} disabled={savingPrizes || !gameId} className="primary-btn">
-          {savingPrizes ? 'Saving...' : 'Save Dividends'}
-        </button>
-        {/* Keep poster generation visible here without changing styles or layout. */}
-        <button className="secondary-btn" onClick={handleMakePoster}>
-          Make Poster
-        </button>
-      </section>
+                ) : (
+                  editablePrizes.map((prize) => (
+                    <tr key={prize.prize_type}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={prize.configured}
+                          disabled={!canEditPrizeConfig || prize.claimed}
+                          onChange={(event) =>
+                            setEditablePrizes((state) =>
+                              state.map((item) =>
+                                item.prize_type === prize.prize_type
+                                  ? {
+                                      ...item,
+                                      configured: event.target.checked,
+                                      enabled: event.target.checked ? item.enabled : false,
+                                    }
+                                  : item,
+                              ),
+                            )
+                          }
+                        />
+                      </td>
+                      <td>{prize.label}</td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          value={prize.amount}
+                          disabled={!prize.configured || !canEditPrizeConfig || prize.claimed}
+                          onChange={(event) => {
+                            const nextAmount = Math.max(0, Number(event.target.value) || 0)
+                            setEditablePrizes((state) =>
+                              state.map((item) =>
+                                item.prize_type === prize.prize_type
+                                  ? { ...item, amount: nextAmount }
+                                  : item,
+                              ),
+                            )
+                          }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={prize.enabled}
+                          disabled={!prize.configured || !canEditPrizeConfig || prize.claimed}
+                          onChange={(event) =>
+                            setEditablePrizes((state) =>
+                              state.map((item) =>
+                                item.prize_type === prize.prize_type
+                                  ? { ...item, enabled: event.target.checked }
+                                  : item,
+                              ),
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        {prize.claimed
+                          ? 'LOCKED'
+                          : prize.configured
+                            ? 'CONFIGURED'
+                            : 'NOT CONFIGURED'}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          <button
+            onClick={handleSavePrizes}
+            disabled={savingPrizes || !gameId || !canEditPrizeConfig || prizeTypesLoading}
+            className="primary-btn"
+          >
+            {savingPrizes ? 'Saving...' : 'Save Prize Configuration'}
+          </button>
+          <button className="secondary-btn" onClick={handleMakePoster} disabled={!gameId}>
+            Make Poster
+          </button>
+        </section>
+      )}
 
       {(showRunView || showBookView) && (
         <section className="admin-card">
@@ -1059,14 +1235,15 @@ const AdminDashboard = () => {
           </div>
 
           <div className="control-buttons">
-            <button onClick={handleRunControl} disabled={!gameId || finished} className="primary-btn">
-              {summary?.game.status === 'RUNNING'
-                ? 'Pause Game'
-                : summary?.game.status === 'PAUSED'
-                  ? 'Resume Game'
-                  : 'Run Game'}
+            <button onClick={handleRunControl} disabled={runControlDisabled} className="primary-btn">
+              {runControlLabel}
             </button>
           </div>
+          {!running && runControlNeedsEnabledPrize && !hasEnabledPrize && (
+            <p className="prize-setup-hint">
+              Start/Resume is blocked until at least one configured prize is enabled.
+            </p>
+          )}
 
           <NumberBoard calledNumbers={calledNumbers} />
         </section>

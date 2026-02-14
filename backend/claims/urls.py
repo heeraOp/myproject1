@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import AdminEvaluateClaimsView, GameWinnersView, PrizeListUpdateView, ClaimSubmitView
+from .views import AdminEvaluateClaimsView, ClaimSubmitView, GameWinnersView
 
 urlpatterns = [
     path("admin/evaluate/", AdminEvaluateClaimsView.as_view(), name="admin-claims-evaluate"),

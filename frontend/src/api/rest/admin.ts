@@ -67,6 +67,17 @@ export type PrizeResponse = {
   claimed: boolean
 }
 
+export type PrizeTypeResponse = {
+  prize_type: string
+  label: string
+}
+
+export type CreatePrizePayload = {
+  prize_type: string
+  amount?: number
+  enabled?: boolean
+}
+
 export type WinnerResponse = {
   id: number
   prize_type: string
@@ -108,6 +119,45 @@ export const getGameBusinessSummary = async (
 
 export const getPrizes = async (gameId: string): Promise<PrizeResponse[]> => {
   const response = await adminApiClient.get<PrizeResponse[]>(`/prizes/game/${gameId}/`)
+  return response.data
+}
+
+export const getPrizeTypes = async (): Promise<PrizeTypeResponse[]> => {
+  const response = await adminApiClient.get<PrizeTypeResponse[]>('/prizes/types/')
+  return response.data
+}
+
+export const createGamePrizes = async (
+  gameId: string,
+  payload: CreatePrizePayload[],
+): Promise<{
+  detail: string
+  created: PrizeResponse[]
+  existing: PrizeResponse[]
+}> => {
+  const response = await adminApiClient.post(`/prizes/game/${gameId}/`, payload)
+  return response.data
+}
+
+export const updateGamePrize = async (
+  gameId: string,
+  prizeType: string,
+  payload: { amount?: number; enabled?: boolean },
+): Promise<PrizeResponse> => {
+  const response = await adminApiClient.patch<PrizeResponse>(
+    `/prizes/game/${gameId}/${prizeType}/`,
+    payload,
+  )
+  return response.data
+}
+
+export const deleteGamePrize = async (
+  gameId: string,
+  prizeType: string,
+): Promise<{ detail: string; deleted: number }> => {
+  const response = await adminApiClient.delete<{ detail: string; deleted: number }>(
+    `/prizes/game/${gameId}/${prizeType}/`,
+  )
   return response.data
 }
 

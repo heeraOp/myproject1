@@ -19,6 +19,7 @@ function App() {
         <Route path="run" element={<AdminDashboard />} />
         <Route path="book" element={<AdminDashboard />} />
         <Route path="list" element={<AdminDashboard />} />
+        <Route path="prizes" element={<AdminDashboard />} />
         <Route path="poster" element={<AdminDashboard />} />
         <Route path="tickets" element={<AdminTicketView />} />
         <Route path="*" element={<Navigate to="/admin" replace />} />

@@ -36,8 +36,13 @@ by game:(get)http://127.0.0.1:8000/api/tickets/game/<game_id>/
 
 by ticket:(get) /api/tickets/game/<game_id>/12/ticketno(1....)
 
-####### Prize configuration (Admin only, earlier step)
-POST /api/claims/admin/prizes/
+####### Prize configuration (Admin)
+GET /api/prizes/types/
+GET /api/prizes/game/<game_id>/
+POST /api/prizes/game/<game_id>/
+PATCH /api/prizes/game/<game_id>/<prize_type>/
+DELETE /api/prizes/game/<game_id>/<prize_type>/
+
 POST /api/claims/admin/evaluate/
 
 ########

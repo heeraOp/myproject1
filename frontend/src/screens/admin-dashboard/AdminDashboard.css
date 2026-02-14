@@ -36,7 +36,7 @@
 
 .admin-subnav {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 14px;
 }
@@ -101,6 +101,33 @@
 
 .admin-message.error {
   border-color: var(--color-ff2d2d);
+}
+
+.prize-setup-state {
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  font-weight: 700;
+}
+
+.prize-setup-state.neutral {
+  background: var(--color-0b1b62);
+}
+
+.prize-setup-state.warning {
+  background: var(--color-rgba-100-10-16-04);
+  border: 1px solid var(--color-ff2d2d);
+}
+
+.prize-setup-state.ready {
+  background: var(--color-0a3f25);
+  border: 1px solid var(--color-20ad63);
+}
+
+.prize-setup-hint {
+  margin: 10px 0 0;
+  font-weight: 700;
+  color: var(--color-ffe700);
 }
 
 .admin-card {
