@@ -66,6 +66,13 @@ body.theme-holi::before {
   opacity: 0.42;
 }
 
+#root > div {
+  background-size: 100% 100% !important;
+  background-position: center top !important;
+  background-repeat: no-repeat !important;
+  background-attachment: fixed !important;
+}
+
 .theme-toggle-card {
   position: fixed;
   top: 14px;

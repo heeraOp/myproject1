@@ -1,7 +1,7 @@
 .lobby-shell {
   min-height: 100vh;
   padding: 10px 8px 20px;
-  background: rgba(8, 10, 28, 0.34);
+  background: transparent;
 }
 
 .player-game-title {
@@ -20,9 +20,10 @@
 .lobby-panel {
   max-width: 920px;
   margin: 0 auto;
-  background: rgba(8, 8, 20, 0.94);
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
   border: 3px solid var(--color-ffe700);
-  border-radius: 12px;
+  border-radius: 16px;
   padding: 10px;
 }
 

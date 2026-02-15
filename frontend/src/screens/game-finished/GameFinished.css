@@ -1,7 +1,7 @@
 .finished-shell {
   min-height: 100vh;
   padding: 10px 8px 20px;
-  background: rgba(7, 15, 45, 0.34);
+  background: transparent;
   color: var(--color-f2f5ff);
 }
 
@@ -12,8 +12,9 @@
   max-width: 1080px;
   margin: 0 auto 14px;
   border: 2px solid var(--color-0d1346);
-  border-radius: 12px;
-  background: var(--color-111b71);
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
   box-shadow: var(--shadow);
 }
 

@@ -867,11 +867,17 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: radial-gradient(circle at top, var(--color-1d2aa5) 0%, var(--color-0b0f3f) 55%, var(--color-070a2c) 100%);
 }
 
 #root {
   min-height: 100vh;
+}
+
+html,
+body,
+#root {
+  background: transparent !important;
+  height: 100%;
 }
 
 a {

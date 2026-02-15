@@ -9,15 +9,13 @@ import AdminRouteGuard from '@/app/routes/AdminRouteGuard'
 import ThemeOverlayProvider from '@/theme/ThemeProvider'
 import { ThemeProvider, useTheme } from '@/theme/ThemeContext'
 import ThemeToggle from '@/theme/ThemeToggle'
-import { useGameStore } from '@/app/store/game.store'
 import { getWallpaperSet } from '@/theme/wallpaperRegistry'
 
 function AppShell() {
   const location = useLocation()
   const showThemeToggle = location.pathname.startsWith('/admin')
-  const activeTheme = useGameStore((state) => state.activeTheme)
   const { theme } = useTheme()
-  const selectedTheme = showThemeToggle ? theme : (activeTheme ?? theme)
+  const selectedTheme = theme
   const selectedWallpaper = getWallpaperSet(selectedTheme)
 
   return (
@@ -26,9 +24,10 @@ function AppShell() {
         style={{
           minHeight: '100vh',
           backgroundImage: `url(${selectedWallpaper.background})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
+          backgroundSize: '100% 100%',
+          backgroundPosition: 'center top',
           backgroundRepeat: 'no-repeat',
+          backgroundAttachment: 'fixed',
         }}
       >
         {showThemeToggle ? <ThemeToggle /> : null}
