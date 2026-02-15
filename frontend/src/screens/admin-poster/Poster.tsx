@@ -1,10 +1,44 @@
+import { useEffect, useState } from 'react'
 import './Poster.css'
+import { useGameStore } from '@/app/store/game.store'
+import { getWallpaperSet } from '@/theme/wallpaperRegistry'
+import { fetchCurrentPublicGame } from '@/api/rest/games'
 
 const Poster = () => {
+  const activeTheme = useGameStore((state) => state.activeTheme)
+  const selectedWallpaper = getWallpaperSet(activeTheme)
+  const [gameName, setGameName] = useState<string>('')
+
+  useEffect(() => {
+    let mounted = true
+    const loadCurrentGame = async () => {
+      try {
+        const currentGame = await fetchCurrentPublicGame()
+        if (!mounted) return
+        setGameName(currentGame?.name ?? '')
+      } catch {
+        if (!mounted) return
+        setGameName('')
+      }
+    }
+    void loadCurrentGame()
+    return () => {
+      mounted = false
+    }
+  }, [])
+
   return (
     <div className="poster-shell">
-      <div className="poster-card">
-        <div className="poster-title">EMOINUTAMBOLAONLINE</div>
+      <div
+        className="poster-card"
+        style={{
+          backgroundImage: `url(${selectedWallpaper.poster})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+        }}
+      >
+        <div className="poster-title">{gameName || 'EMOINUTAMBOLAONLINE'}</div>
         <div className="poster-subtitle">BIG WIN</div>
         <div className="poster-highlight">Ticket price is Rs.50/-</div>
         <div className="poster-highlight">Total ticket for this game is 100</div>

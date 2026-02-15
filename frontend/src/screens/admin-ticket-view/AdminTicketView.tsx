@@ -160,6 +160,7 @@ const AdminTicketView = () => {
       <section className="admin-view-banner">
         <div>
           <h2>Game Reference</h2>
+          <p>Game Name: {summary?.game.name ?? '-'}</p>
           <p>Game ID: {gameId || 'Not selected'}</p>
           <p>Game Status: {summary?.game.status ?? '-'}</p>
           <p>Booking Status: {summary?.game.booking_status ?? '-'}</p>

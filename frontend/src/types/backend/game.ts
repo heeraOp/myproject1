@@ -11,6 +11,7 @@ export type GameAgent = {
 
 export type PublicGame = {
   id: string
+  name: string
   date: string
   status: GameStatus
   ticket_price: number

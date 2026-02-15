@@ -1,19 +1,16 @@
 .lobby-shell {
   min-height: 100vh;
-  padding: 18px 14px 40px;
-  background:
-    radial-gradient(circle at 20% 15%, var(--color-rgba-255-66-66-03) 0, var(--color-rgba-255-66-66-0) 28%),
-    radial-gradient(circle at 80% 20%, var(--color-rgba-90-120-255-042) 0, var(--color-rgba-90-120-255-0) 30%),
-    linear-gradient(180deg, var(--color-080631) 0%, var(--color-121a63) 55%, var(--color-080a37) 100%);
+  padding: 10px 8px 20px;
+  background: rgba(8, 10, 28, 0.34);
 }
 
 .lobby-panel {
   max-width: 920px;
   margin: 0 auto;
-  background: var(--color-rgba-8-8-20-078);
+  background: rgba(8, 8, 20, 0.94);
   border: 3px solid var(--color-ffe700);
   border-radius: 12px;
-  padding: 14px;
+  padding: 10px;
 }
 
 .lobby-actions {

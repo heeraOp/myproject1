@@ -218,19 +218,27 @@ const LiveGame = () => {
 
   useEffect(() => {
     const unsubNewGame = socketManager.subscribe('new_game_created', async (event: unknown) => {
-      const payload = (event as { data?: PublicGame }).data
-      const nextGameId = typeof payload?.id === 'string' ? payload.id : ''
+      const incoming = event as {
+        data?: Partial<PublicGame> & { id?: string; name?: string }
+        game_id?: string
+        name?: string
+        active_theme?: PublicGame['active_theme']
+      }
+      const payload = incoming.data
+      const nextGameId =
+        typeof payload?.id === 'string' ? payload.id : typeof incoming.game_id === 'string' ? incoming.game_id : ''
       if (!nextGameId) return
 
       const nextGame: PublicGame = {
         id: nextGameId,
+        name: String(payload?.name ?? incoming.name ?? 'Tambola Game'),
         date: String(payload?.date ?? new Date().toISOString()),
         status: (payload?.status ?? 'CREATED') as PublicGame['status'],
         ticket_price: Number(payload?.ticket_price ?? 0),
         booking_status: (payload?.booking_status ?? 'OPEN') as PublicGame['booking_status'],
         website_status: (payload?.website_status ?? 'OPEN') as PublicGame['website_status'],
         agent: payload?.agent ?? null,
-        active_theme: payload?.active_theme,
+        active_theme: payload?.active_theme ?? incoming.active_theme,
         is_active: true,
       }
 
@@ -356,7 +364,7 @@ const LiveGame = () => {
       <WinnerCelebrationOverlay />
       <section className="live-header-card">
         <div className="live-header-top">
-          <h1>Live Tambola</h1>
+          <h1>{selectedGame?.name || summary?.game.name || 'Live Tambola'}</h1>
           <div className="live-header-actions">
             <button type="button" className="ghost-btn" onClick={() => navigate('/')}>
               Lobby
@@ -388,7 +396,7 @@ const LiveGame = () => {
             {!games.length && <option value="">No game</option>}
             {games.map((game) => (
               <option key={game.id} value={game.id}>
-                {formatDateTimeInIST(game.date)} ({game.status})
+                {game.name} - {formatDateTimeInIST(game.date)} ({game.status})
               </option>
             ))}
           </select>

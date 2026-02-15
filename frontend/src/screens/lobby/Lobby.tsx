@@ -197,19 +197,27 @@ const Lobby = () => {
 
   useEffect(() => {
     const unsubNewGame = socketManager.subscribe('new_game_created', async (event: unknown) => {
-      const payload = (event as { data?: PublicGame }).data
-      const nextGameId = typeof payload?.id === 'string' ? payload.id : ''
+      const incoming = event as {
+        data?: Partial<PublicGame> & { id?: string; name?: string }
+        game_id?: string
+        name?: string
+        active_theme?: PublicGame['active_theme']
+      }
+      const payload = incoming.data
+      const nextGameId =
+        typeof payload?.id === 'string' ? payload.id : typeof incoming.game_id === 'string' ? incoming.game_id : ''
       if (!nextGameId) return
 
       const nextGame: PublicGame = {
         id: nextGameId,
+        name: String(payload?.name ?? incoming.name ?? 'Tambola Game'),
         date: String(payload?.date ?? new Date().toISOString()),
         status: (payload?.status ?? 'CREATED') as PublicGame['status'],
         ticket_price: Number(payload?.ticket_price ?? 0),
         booking_status: (payload?.booking_status ?? 'OPEN') as PublicGame['booking_status'],
         website_status: (payload?.website_status ?? 'OPEN') as PublicGame['website_status'],
         agent: payload?.agent ?? null,
-        active_theme: payload?.active_theme,
+        active_theme: payload?.active_theme ?? incoming.active_theme,
         is_active: true,
       }
 
@@ -463,11 +471,12 @@ const Lobby = () => {
             {!games.length && <option value="">No game</option>}
             {games.map((game) => (
               <option key={game.id} value={game.id}>
-                {formatDate(game.date)} {formatClock(game.date)} ({game.status})
+                {game.name} - {formatDate(game.date)} {formatClock(game.date)} ({game.status})
               </option>
             ))}
           </select>
         </div>
+        <div className="support-meta">Game: {selectedGame?.name ?? '--'}</div>
 
         <div className="check-title">CHECK AVAILABLE TICKET</div>
 

@@ -11,6 +11,7 @@ export type AgentOption = {
 
 export type AdminGameListItem = {
   id: string
+  name: string
   date: string
   status: string
   calling_interval?: number
@@ -27,6 +28,7 @@ export type AdminGameListItem = {
 export type GameSummaryResponse = {
   game: {
     id: string
+    name: string
     status: string
     calling_interval: number
     booking_status: string
@@ -57,6 +59,7 @@ export type GameSummaryResponse = {
 export type GameStateResponse = {
   game: {
     id: string
+    name: string
     status: string
     calling_status: 'ON' | 'OFF'
     calling_interval: number
@@ -139,6 +142,7 @@ export type TicketResponse = {
 export type GameTicketsSnapshotResponse = {
   game: {
     id: string
+    name?: string
     status: string
   }
   final_immutable: boolean
@@ -305,6 +309,7 @@ export const generateTickets = async (payload: { game_id: string; total_tickets:
 }
 
 export const saveGameSettings = async (payload: {
+  name: string
   date: string
   total_tickets: number
   ticket_price: number

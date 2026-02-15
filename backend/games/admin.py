@@ -12,9 +12,9 @@ class AgentAdmin(admin.ModelAdmin):
 
 @admin.register(Game)
 class GameAdmin(admin.ModelAdmin):
-    list_display = ("id", "status", "booking_status", "ticket_price", "total_ticket_limit", "agent", "is_active")
+    list_display = ("id", "name", "status", "booking_status", "ticket_price", "total_ticket_limit", "agent", "is_active")
     list_filter = ("status", "booking_status", "is_active")
-    search_fields = ("id", "agent__name", "agent__whatsapp_number")
+    search_fields = ("id", "name", "agent__name", "agent__whatsapp_number")
 
 
 @admin.register(CalledNumber)

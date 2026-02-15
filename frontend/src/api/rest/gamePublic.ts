@@ -4,6 +4,7 @@ import type { ThemeName } from '@/types/backend/game'
 export type PublicGameSummary = {
   game: {
     id: string
+    name: string
     status: string
     calling_interval: number
     booking_status: string
@@ -33,6 +34,7 @@ export type PublicGameSummary = {
 export type PublicGameState = {
   game: {
     id: string
+    name: string
     status: string
     calling_status: 'ON' | 'OFF'
     calling_interval: number

@@ -46,6 +46,7 @@ class Game(models.Model):
         FESTIVAL_DIWALI = "festival-diwali", "Festival Diwali"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255)
     status = models.CharField(max_length=20, choices=Status.choices)
     game_datetime = models.DateTimeField()
     ticket_price = models.PositiveIntegerField()
@@ -74,7 +75,7 @@ class Game(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.id} - {self.status}"
+        return f"{self.name} ({self.id}) - {self.status}"
 
 
 class CalledNumber(models.Model):

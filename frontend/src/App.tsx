@@ -7,16 +7,30 @@ import AdminTicketView from '@/screens/admin-ticket-view/AdminTicketView'
 import AdminLogin from '@/screens/admin-login/AdminLogin'
 import AdminRouteGuard from '@/app/routes/AdminRouteGuard'
 import ThemeOverlayProvider from '@/theme/ThemeProvider'
-import { ThemeProvider } from '@/theme/ThemeContext'
+import { ThemeProvider, useTheme } from '@/theme/ThemeContext'
 import ThemeToggle from '@/theme/ThemeToggle'
+import { useGameStore } from '@/app/store/game.store'
+import { getWallpaperSet } from '@/theme/wallpaperRegistry'
 
-function App() {
+function AppShell() {
   const location = useLocation()
   const showThemeToggle = location.pathname.startsWith('/admin')
+  const activeTheme = useGameStore((state) => state.activeTheme)
+  const { theme } = useTheme()
+  const selectedTheme = showThemeToggle ? theme : (activeTheme ?? theme)
+  const selectedWallpaper = getWallpaperSet(selectedTheme)
 
   return (
-    <ThemeProvider>
-      <ThemeOverlayProvider>
+    <ThemeOverlayProvider>
+      <div
+        style={{
+          minHeight: '100vh',
+          backgroundImage: `url(${selectedWallpaper.background})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+        }}
+      >
         {showThemeToggle ? <ThemeToggle /> : null}
         <Routes>
           <Route path="/" element={<Lobby />} />
@@ -36,7 +50,15 @@ function App() {
           <Route path="/api/*" element={<Navigate to="/admin/login" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </ThemeOverlayProvider>
+      </div>
+    </ThemeOverlayProvider>
+  )
+}
+
+function App() {
+  return (
+    <ThemeProvider>
+      <AppShell />
     </ThemeProvider>
   )
 }

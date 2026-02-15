@@ -1,10 +1,7 @@
 .live-shell {
   min-height: 100vh;
-  padding: 18px 14px 44px;
-  background:
-    radial-gradient(circle at 80% 4%, var(--color-rgba-238-28-55-02) 0, var(--color-rgba-238-28-55-0) 32%),
-    radial-gradient(circle at 15% 8%, var(--color-rgba-60-120-255-026) 0, var(--color-rgba-60-120-255-0) 28%),
-    linear-gradient(180deg, var(--color-070f3d) 0%, var(--color-0f1e78) 58%, var(--color-071139) 100%);
+  padding: 10px 8px 20px;
+  background: rgba(7, 15, 45, 0.34);
   color: var(--color-f3f5ff);
 }
 
@@ -20,7 +17,7 @@
 }
 
 .live-header-card {
-  padding: 14px;
+  padding: 10px;
 }
 
 .live-header-top {
@@ -149,7 +146,7 @@
 }
 
 .live-card {
-  padding: 14px;
+  padding: 10px;
 }
 
 .live-card h2 {

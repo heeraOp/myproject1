@@ -107,6 +107,9 @@ class GameConsumer(AsyncWebsocketConsumer):
             text_data=json.dumps(
                 {
                     "type": "new_game_created",
+                    "game_id": event.get("game_id") or payload.get("id"),
+                    "name": event.get("name") or payload.get("name"),
+                    "active_theme": event.get("active_theme") or payload.get("active_theme"),
                     "data": payload,
                 }
             )

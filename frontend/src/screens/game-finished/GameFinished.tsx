@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import AnnouncementBanner from '@/components/common/AnnouncementBanner'
 import { fetchCurrentPublicGame } from '@/api/rest/games'
 import {
@@ -43,6 +43,7 @@ const PRIZE_LABEL_MAP: Record<string, string> = {
 
 const GameFinished = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const [games, setGames] = useState<PublicGame[]>([])
   const [selectedGameId, setSelectedGameId] = useState('')
@@ -135,6 +136,7 @@ const GameFinished = () => {
     () => games.find((game) => game.id === selectedGameId) ?? null,
     [games, selectedGameId],
   )
+  const isAdminView = location.pathname.startsWith('/admin')
 
   useGameSocket(selectedGameId || undefined)
 
@@ -143,7 +145,11 @@ const GameFinished = () => {
       <AnnouncementBanner gameId={selectedGameId || undefined} />
       <section className="finished-header">
         <div>
-          <h1>Game Finished Summary</h1>
+          <h1>
+            {selectedGame?.name || summary?.game.name
+              ? `${selectedGame?.name || summary?.game.name} - Finished Summary`
+              : 'Game Finished Summary'}
+          </h1>
           <p>{selectedGame ? formatDateTimeInIST(selectedGame.date) : '--'}</p>
         </div>
         <div className="finished-header-actions">
@@ -170,7 +176,7 @@ const GameFinished = () => {
           {!games.length && <option value="">No game</option>}
           {games.map((game) => (
             <option key={game.id} value={game.id}>
-              {formatDateTimeInIST(game.date)} ({game.status})
+              {game.name} - {formatDateTimeInIST(game.date)} ({game.status})
             </option>
           ))}
         </select>
@@ -193,27 +199,29 @@ const GameFinished = () => {
             </div>
           </section>
 
-          <section className="finished-card">
-            <h2>Business Summary</h2>
-            <div className="result-kv">
-              <div>Total tickets</div>
-              <div>{business?.total_tickets ?? '--'}</div>
-              <div>Tickets booked</div>
-              <div>{business?.tickets_booked ?? '--'}</div>
-              <div>Tickets left</div>
-              <div>{business?.tickets_left ?? '--'}</div>
-              <div>Ticket price</div>
-              <div>{summary?.game.ticket_price ?? '--'}</div>
-              <div>Agent commission</div>
-              <div>{summary?.game.agent_commission ?? '--'}</div>
-              <div>Total revenue</div>
-              <div>{business?.total_revenue ?? '--'}</div>
-              <div>Total prize money</div>
-              <div>{business?.total_prize_money ?? '--'}</div>
-              <div>Total profit</div>
-              <div>{business?.total_profit ?? '--'}</div>
-            </div>
-          </section>
+          {isAdminView && (
+            <section className="finished-card">
+              <h2>Business Summary</h2>
+              <div className="result-kv">
+                <div>Total tickets</div>
+                <div>{business?.total_tickets ?? '--'}</div>
+                <div>Tickets booked</div>
+                <div>{business?.tickets_booked ?? '--'}</div>
+                <div>Tickets left</div>
+                <div>{business?.tickets_left ?? '--'}</div>
+                <div>Ticket price</div>
+                <div>{summary?.game.ticket_price ?? '--'}</div>
+                <div>Agent commission</div>
+                <div>{summary?.game.agent_commission ?? '--'}</div>
+                <div>Total revenue</div>
+                <div>{business?.total_revenue ?? '--'}</div>
+                <div>Total prize money</div>
+                <div>{business?.total_prize_money ?? '--'}</div>
+                <div>Total profit</div>
+                <div>{business?.total_profit ?? '--'}</div>
+              </div>
+            </section>
+          )}
 
           <section className="finished-card">
             <h2>Winner History</h2>

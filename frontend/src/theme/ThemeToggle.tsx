@@ -12,7 +12,7 @@ const ThemeToggle = () => {
   return (
     <div className="theme-toggle-card">
       <label className="theme-toggle-label" htmlFor="theme-select">
-        Theme
+        Wallpapers
       </label>
       <select
         id="theme-select"

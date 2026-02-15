@@ -4,6 +4,7 @@ import type { PlayerTicket } from '@/types/backend/ticket'
 export type GameTicketsSnapshotResponse = {
   game: {
     id: string
+    name?: string
     status: string
   }
   final_immutable: boolean

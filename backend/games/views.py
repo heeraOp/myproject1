@@ -124,6 +124,7 @@ def _admin_game_payload(game):
     game_datetime = timezone.localtime(game.game_datetime) if timezone.is_aware(game.game_datetime) else game.game_datetime
     return {
         "id": str(game.id),
+        "name": game.name,
         "date": game_datetime.isoformat() if hasattr(game_datetime, "isoformat") else str(game_datetime),
         "status": game.status,
         "calling_interval": game.calling_interval,
@@ -139,6 +140,7 @@ def _admin_game_payload(game):
 
 
 class AdminGameCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255, trim_whitespace=True)
     date = serializers.DateTimeField(default_timezone=timezone.get_default_timezone())
     ticket_price = serializers.IntegerField(min_value=1)
     total_tickets = serializers.IntegerField(min_value=1)
@@ -165,6 +167,12 @@ class AdminGameCreateSerializer(serializers.Serializer):
         if timezone.is_naive(value):
             return timezone.make_aware(value, default_tz)
         return timezone.localtime(value, default_tz)
+
+    def validate_name(self, value):
+        name = value.strip()
+        if not name:
+            raise serializers.ValidationError("name is required.")
+        return name
 
     def validate_agent_id(self, value):
         if value in (None, ""):
@@ -510,6 +518,7 @@ class AdminGameListCreateView(APIView):
             return Response({"detail": str(first_error)}, status=400)
 
         validated = serializer.validated_data
+        name = validated["name"]
         game_datetime = validated["date"]
         ticket_price = validated["ticket_price"]
         total_tickets = validated["total_tickets"]
@@ -524,6 +533,7 @@ class AdminGameListCreateView(APIView):
             Game.objects.filter(is_active=True).update(is_active=False)
 
             game = Game.objects.create(
+                name=name,
                 status=Game.Status.CREATED,
                 booking_status=booking_status,
                 website_status=website_status,
@@ -563,6 +573,9 @@ class AdminGameListCreateView(APIView):
                 "global_lobby",
                 {
                     "type": "new_game_created",
+                    "game_id": str(game.id),
+                    "name": game.name,
+                    "active_theme": game.active_theme,
                     "data": game_payload,
                 },
             )
@@ -637,6 +650,7 @@ class AgentPublicSerializer(serializers.Serializer):
 
 class PublicGameSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
     date = serializers.DateTimeField(source="game_datetime", read_only=True)
     status = serializers.CharField(read_only=True)
     ticket_price = serializers.IntegerField(read_only=True)
@@ -725,6 +739,7 @@ class GameStateView(APIView):
             {
                 "game": {
                     "id": str(game.id),
+                    "name": game.name,
                     "status": game.status,
                     "calling_status": calling_status,
                     "calling_interval": game.calling_interval,
@@ -774,6 +789,7 @@ class GameTicketsView(APIView):
             {
                 "game": {
                     "id": str(game.id),
+                    "name": game.name,
                     "status": game.status,
                 },
                 "final_immutable": game.status == Game.Status.FINISHED,
@@ -833,6 +849,7 @@ class GameSummaryView(APIView):
 
         game_payload = {
             "id": str(game.id),
+            "name": game.name,
             "status": game.status,
             "calling_interval": game.calling_interval,
             "booking_status": game.booking_status,

@@ -49,9 +49,11 @@ import {
   toggleAdminTheme,
 } from '@/utils/theme'
 import { formatDateTimeInIST, toDateTimeLocalInputInIST } from '@/utils/dateTime'
+import { wallpaperRegistry, resolveWallpaperTheme } from '@/theme/wallpaperRegistry'
 import './AdminDashboard.css'
 
 type SettingsForm = {
+  gameName: string
   gameDateTime: string
   totalTicketLimit: string
   ticketPrice: string
@@ -76,6 +78,8 @@ type TicketBookedSocketPayload = {
   status?: string
   player_name?: string
 }
+
+type PosterBackgroundKey = keyof typeof wallpaperRegistry
 
 const CLAIM_MONITOR_ORDER = [
   { prizeType: 'FIRST_HOUSE', label: 'First Full House' },
@@ -112,6 +116,13 @@ const FALLBACK_PRIZE_TYPES: PrizeTypeResponse[] = Object.entries(PRIZE_LABEL_MAP
     label,
   }),
 )
+
+const POSTER_BACKGROUND_LABELS: Record<PosterBackgroundKey, string> = {
+  christmas: 'Christmas',
+  default: 'Default',
+  diwali: 'Diwali',
+  holi: 'Holi',
+}
 
 const buildPrizeSetupRows = (
   prizeTypes: PrizeTypeResponse[],
@@ -211,8 +222,12 @@ const AdminDashboard = () => {
   const [announcementText, setAnnouncementText] = useState('')
   const [showTicketCards, setShowTicketCards] = useState(false)
   const [theme, setTheme] = useState(getActiveTheme())
+  const [posterBackgroundKey, setPosterBackgroundKey] = useState<PosterBackgroundKey>(() =>
+    resolveWallpaperTheme(getActiveTheme()),
+  )
 
   const [settingsForm, setSettingsForm] = useState<SettingsForm>({
+    gameName: '',
     gameDateTime: '',
     totalTicketLimit: '',
     ticketPrice: '',
@@ -372,6 +387,7 @@ const AdminDashboard = () => {
 
       const selectedGame = games.find((item) => item.id === selectedGameId)
       setSettingsForm({
+        gameName: String(summaryData.game.name ?? selectedGame?.name ?? ''),
         gameDateTime: toDateTimeLocalValue(selectedGame?.date),
         totalTicketLimit: String(summaryData.game.total_tickets ?? businessData.total_tickets),
         ticketPrice: String(summaryData.game.ticket_price ?? selectedGame?.ticket_price ?? ''),
@@ -689,6 +705,7 @@ const AdminDashboard = () => {
     setActionMessage('')
     try {
       const createdGame = await saveGameSettings({
+        name: settingsForm.gameName.trim(),
         date: settingsForm.gameDateTime,
         total_tickets: Number(settingsForm.totalTicketLimit),
         ticket_price: Number(settingsForm.ticketPrice),
@@ -801,30 +818,80 @@ const AdminDashboard = () => {
     }
   }
 
-  const generatePosterPdf = () => {
+  const loadImageDataUrl = (source: string): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const image = new Image()
+      image.onload = () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = image.width
+        canvas.height = image.height
+        const context = canvas.getContext('2d')
+        if (!context) {
+          reject(new Error('Canvas context unavailable'))
+          return
+        }
+        context.drawImage(image, 0, 0)
+        resolve(canvas.toDataURL('image/jpeg', 0.9))
+      }
+      image.onerror = () => reject(new Error('Unable to load poster background'))
+      image.src = source
+    })
+
+  const drawPosterBackground = async (
+    doc: jsPDF,
+    source: string,
+    pageWidth: number,
+    pageHeight: number,
+  ) => {
+    const imageDataUrl = await loadImageDataUrl(source)
+    const imageProps = doc.getImageProperties(imageDataUrl)
+    const imageRatio = imageProps.width / imageProps.height
+    let drawWidth = pageWidth
+    let drawHeight = drawWidth / imageRatio
+
+    if (drawHeight < pageHeight) {
+      drawHeight = pageHeight
+      drawWidth = drawHeight * imageRatio
+    }
+
+    const x = (pageWidth - drawWidth) / 2
+    const y = (pageHeight - drawHeight) / 2
+    doc.addImage(imageDataUrl, 'JPEG', x, y, drawWidth, drawHeight)
+  }
+
+  const generatePosterPdf = async () => {
     // Poster-only logic: build a PDF from existing dividend state (no API calls).
     const enabledPrizes = prizes.filter((prize) => prize.enabled)
     const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
     const pageWidth = doc.internal.pageSize.getWidth()
     const pageHeight = doc.internal.pageSize.getHeight()
+    const selectedPosterBackground =
+      wallpaperRegistry[posterBackgroundKey]?.poster ?? wallpaperRegistry.default.poster
     const margin = 48
     let y = margin
 
+    try {
+      await drawPosterBackground(doc, selectedPosterBackground, pageWidth, pageHeight)
+    } catch {
+      // If wallpaper fails to load, keep existing text-only PDF output.
+    }
+
+    doc.setTextColor(16, 18, 30)
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(22)
-    doc.text('Tambola Prize List', margin, y)
+    doc.setFontSize(26)
+    doc.text(settingsForm.gameName || 'Tambola Prize List', margin, y)
     y += 22
 
     const drawDate = formatDateTime(games.find((item) => item.id === gameId)?.date)
     if (drawDate !== '-') {
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(12)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(14)
       doc.text(`Draw: ${drawDate}`, margin, y)
       y += 16
     }
 
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(12)
+    doc.setFontSize(14)
     y += 8
     doc.text('Prize Type', margin, y)
     doc.text('Amount', pageWidth - margin, y, { align: 'right' })
@@ -833,7 +900,8 @@ const AdminDashboard = () => {
     doc.line(margin, y, pageWidth - margin, y)
     y += 14
 
-    doc.setFont('helvetica', 'normal')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(14)
     enabledPrizes.forEach((prize) => {
       if (y > pageHeight - margin - 24) {
         doc.addPage()
@@ -845,16 +913,16 @@ const AdminDashboard = () => {
       y += 18
     })
 
-    doc.setFont('helvetica', 'italic')
-    doc.setFontSize(11)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(13)
     doc.text('Good Luck & Happy Playing', margin, pageHeight - margin)
 
     doc.save('tambola-prize-list.pdf')
   }
 
-  const handleMakePoster = () => {
+  const handleMakePoster = async () => {
     // Click handler for poster generation (frontend-only).
-    generatePosterPdf()
+    await generatePosterPdf()
   }
 
   const handleRunControl = async () => {
@@ -900,6 +968,7 @@ const AdminDashboard = () => {
     // Reset ticket view mode when switching games.
     setShowTicketCards(false)
     setSettingsForm({
+      gameName: '',
       gameDateTime: '',
       totalTicketLimit: '',
       ticketPrice: '',
@@ -1031,7 +1100,7 @@ const AdminDashboard = () => {
             {!games.length && <option value="">{publicGamesError ? 'Games unavailable' : 'No game'}</option>}
             {games.map((game) => (
               <option key={game.id} value={game.id}>
-                {formatDateTime(game.date)} ({game.status})
+                {game.name} - {formatDateTime(game.date)} ({game.status})
               </option>
             ))}
           </select>
@@ -1079,6 +1148,8 @@ const AdminDashboard = () => {
       <section className="admin-card">
         <h2>Admin Dashboard (Read-only)</h2>
         <div className="kv-grid">
+          <div>Game name</div>
+          <div>{summary?.game.name ?? settingsForm.gameName ?? '-'}</div>
           <div>Game date-time</div>
           <div>{formatDateTime(games.find((item) => item.id === gameId)?.date)}</div>
           <div>Game status</div>
@@ -1120,6 +1191,17 @@ const AdminDashboard = () => {
         <section className="admin-card">
           <h2>Game Settings</h2>
           <div className="form-grid">
+            <label>
+              Game name
+              <input
+                type="text"
+                value={settingsForm.gameName}
+                onChange={(event) =>
+                  setSettingsForm((state) => ({ ...state, gameName: event.target.value }))
+                }
+                maxLength={255}
+              />
+            </label>
             <label>
               Game date-time
               <input
@@ -1613,8 +1695,32 @@ const AdminDashboard = () => {
       {showPosterView && (
         <section className="admin-card print-area">
           <h2>Poster Preview</h2>
-          <div className="poster-preview">
-            <h3>Tambola Big Win</h3>
+          <div className="poster-controls">
+            <label htmlFor="poster-background-select">
+              Poster Background
+              <select
+                id="poster-background-select"
+                value={posterBackgroundKey}
+                onChange={(event) => setPosterBackgroundKey(event.target.value as PosterBackgroundKey)}
+              >
+                {(Object.keys(wallpaperRegistry) as PosterBackgroundKey[]).map((key) => (
+                  <option key={key} value={key}>
+                    {POSTER_BACKGROUND_LABELS[key]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div
+            className="poster-preview"
+            style={{
+              backgroundImage: `linear-gradient(rgba(23, 14, 44, 0.68), rgba(23, 14, 44, 0.68)), url(${wallpaperRegistry[posterBackgroundKey]?.poster ?? wallpaperRegistry.default.poster})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat',
+            }}
+          >
+            <h3>{settingsForm.gameName || 'Tambola Big Win'}</h3>
             <p>Draw: {formatDateTime(games.find((item) => item.id === gameId)?.date)}</p>
             <p>Ticket price: {settingsForm.ticketPrice || '-'}</p>
             <p>Total tickets: {totalTicketsValue}</p>
