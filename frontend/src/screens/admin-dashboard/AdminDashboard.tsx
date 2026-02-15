@@ -70,6 +70,13 @@ type PrizeSetupRow = {
   configured: boolean
 }
 
+type TicketBookedSocketPayload = {
+  game_id?: string
+  ticket_id?: string
+  status?: string
+  player_name?: string
+}
+
 const CLAIM_MONITOR_ORDER = [
   { prizeType: 'FIRST_HOUSE', label: 'First Full House' },
   { prizeType: 'SECOND_HOUSE', label: 'Second Full House' },
@@ -446,6 +453,7 @@ const AdminDashboard = () => {
   useEffect(() => {
     const unsubNewGame = socketManager.subscribe('new_game_created', async (event: unknown) => {
       const payload = (event as { data?: AdminGameListItem }).data
+      if (!payload) return
       const nextGameId = typeof payload?.id === 'string' ? payload.id : ''
       if (!nextGameId) return
 
@@ -484,36 +492,31 @@ const AdminDashboard = () => {
     })
 
     const unsubTicketBooked = socketManager.subscribe('ticket_booked', async (event: unknown) => {
-      const payload = (
-        event as {
-          data?: {
-            game_id?: string
-            ticket_id?: string
-            status?: string
-            player_name?: string
-          }
-        }
-      ).data
+      const payload = (event as { data?: TicketBookedSocketPayload }).data
+      if (!payload) return
 
-      const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
+      const eventGameId = typeof payload.game_id === 'string' ? payload.game_id : ''
       if (!eventGameId || !gameId || eventGameId !== gameId) return
 
-      const ticketId = typeof payload?.ticket_id === 'string' ? payload.ticket_id : ''
+      const ticketId = typeof payload.ticket_id === 'string' ? payload.ticket_id : ''
       if (ticketId) {
-        setTickets((current) =>
-          current.map((ticket) =>
+        const nextStatus =
+          typeof payload.status === 'string'
+            ? (payload.status as TicketResponse['status'])
+            : undefined
+        const nextPlayerName =
+          typeof payload.player_name === 'string' && payload.player_name.length > 0
+            ? payload.player_name
+            : undefined
+
+        setTickets((current: TicketResponse[]) =>
+          current.map((ticket): TicketResponse =>
             ticket.id === ticketId
               ? {
                   ...ticket,
-                  status: typeof payload?.status === 'string' ? payload.status : ticket.status,
-                  player_name:
-                    typeof payload?.player_name === 'string' && payload.player_name.length > 0
-                      ? payload.player_name
-                      : ticket.player_name,
-                  requested_by_name:
-                    typeof payload?.player_name === 'string' && payload.player_name.length > 0
-                      ? payload.player_name
-                      : ticket.requested_by_name,
+                  status: nextStatus ?? ticket.status,
+                  player_name: nextPlayerName ?? ticket.player_name,
+                  requested_by_name: nextPlayerName ?? ticket.requested_by_name,
                 }
               : ticket,
           ),

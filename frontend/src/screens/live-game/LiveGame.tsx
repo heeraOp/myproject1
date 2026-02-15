@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
 import AnnouncementBanner from '@/components/common/AnnouncementBanner'
@@ -74,6 +74,9 @@ const LiveGame = () => {
   const [error, setError] = useState('')
   const [theme, setTheme] = useState(getActiveTheme())
   const [isThemeLocked, setIsThemeLocked] = useState(isAdminThemeActive())
+  const currentGameIdRef = useRef<string>('')
+  const loadRequestRef = useRef(0)
+  const ticketRefreshRequestRef = useRef(0)
 
   const handleThemeToggle = () => {
     if (isThemeLocked) return
@@ -143,6 +146,8 @@ const LiveGame = () => {
   }, [searchParams, setActiveTheme])
 
   const loadGameData = useCallback(async (gameId: string) => {
+    const requestId = loadRequestRef.current + 1
+    loadRequestRef.current = requestId
     setLoading(true)
     setError('')
     try {
@@ -153,6 +158,8 @@ const LiveGame = () => {
         fetchGameTickets(gameId, playerPhone),
         fetchWinners(gameId),
       ])
+      if (loadRequestRef.current !== requestId) return
+      if (currentGameIdRef.current !== gameId) return
 
       setSummary(summaryData)
       setPrizes(prizesData)
@@ -161,17 +168,53 @@ const LiveGame = () => {
       setTickets(ticketsData)
       setHistoryWinners(dedupeWinners(winnersData))
     } catch {
+      if (loadRequestRef.current !== requestId) return
+      if (currentGameIdRef.current !== gameId) return
       setError('Unable to load live game state.')
     } finally {
+      if (loadRequestRef.current !== requestId) return
+      if (currentGameIdRef.current !== gameId) return
       setLoading(false)
     }
   }, [playerPhone, replaceFromBackendState, setTicketsFromBackend])
 
+  const refreshTicketsForGame = useCallback(
+    async (gameId: string) => {
+      const requestId = ticketRefreshRequestRef.current + 1
+      ticketRefreshRequestRef.current = requestId
+      try {
+        const latestTickets = await fetchGameTickets(gameId, playerPhone)
+        if (ticketRefreshRequestRef.current !== requestId) return
+        if (currentGameIdRef.current !== gameId) return
+        setTicketsFromBackend(gameId, latestTickets)
+        setTickets(latestTickets)
+      } catch {
+        return
+      }
+    },
+    [playerPhone, setTicketsFromBackend],
+  )
+
   useEffect(() => {
-    if (!selectedGameId) return
+    currentGameIdRef.current = selectedGameId
+    loadRequestRef.current += 1
+    ticketRefreshRequestRef.current += 1
+
+    if (!selectedGameId) {
+      setTickets([])
+      setHistoryWinners([])
+      setSummary(null)
+      setPrizes([])
+      setLoading(false)
+      return
+    }
+
+    setTickets([])
+    setHistoryWinners([])
+    setTicketsFromBackend(selectedGameId, [])
     clearWinnerQueue()
     void loadGameData(selectedGameId)
-  }, [clearWinnerQueue, loadGameData, selectedGameId])
+  }, [clearWinnerQueue, loadGameData, selectedGameId, setTicketsFromBackend])
 
   useEffect(() => {
     const unsubNewGame = socketManager.subscribe('new_game_created', async (event: unknown) => {
@@ -197,30 +240,19 @@ const LiveGame = () => {
       setActiveTheme(nextGame.active_theme ?? null)
       setGames([nextGame])
       setSelectedGameId(nextGameId)
+      setSummary(null)
+      setPrizes([])
       setTickets([])
       setHistoryWinners([])
       setTicketsFromBackend(nextGameId, [])
       clearWinnerQueue()
-
-      try {
-        await loadGameData(nextGameId)
-      } catch {
-        return
-      }
     })
 
     const unsubTicketsGenerated = socketManager.subscribe('tickets_generated', async (event: unknown) => {
       const payload = (event as { data?: { game_id?: string } }).data
       const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
-      if (!eventGameId || !selectedGameId || eventGameId !== selectedGameId) return
-
-      try {
-        const latestTickets = await fetchGameTickets(eventGameId, playerPhone)
-        setTicketsFromBackend(eventGameId, latestTickets)
-        setTickets(latestTickets)
-      } catch {
-        return
-      }
+      if (!eventGameId || !currentGameIdRef.current || eventGameId !== currentGameIdRef.current) return
+      await refreshTicketsForGame(eventGameId)
     })
 
     const unsubTicketBooked = socketManager.subscribe('ticket_booked', async (event: unknown) => {
@@ -235,7 +267,7 @@ const LiveGame = () => {
       ).data
 
       const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
-      if (!eventGameId || !selectedGameId || eventGameId !== selectedGameId) return
+      if (!eventGameId || !currentGameIdRef.current || eventGameId !== currentGameIdRef.current) return
 
       const ticketId = typeof payload?.ticket_id === 'string' ? payload.ticket_id : ''
       if (ticketId) {
@@ -244,20 +276,17 @@ const LiveGame = () => {
             ticket.id === ticketId
               ? {
                   ...ticket,
-                  status: typeof payload?.status === 'string' ? payload.status : ticket.status,
+                  status:
+                    typeof payload?.status === 'string'
+                      ? (payload.status as PlayerTicket['status'])
+                      : ticket.status,
                 }
               : ticket,
           ),
         )
       }
 
-      try {
-        const latestTickets = await fetchGameTickets(eventGameId, playerPhone)
-        setTicketsFromBackend(eventGameId, latestTickets)
-        setTickets(latestTickets)
-      } catch {
-        return
-      }
+      await refreshTicketsForGame(eventGameId)
     })
 
     return () => {
@@ -265,7 +294,7 @@ const LiveGame = () => {
       unsubTicketsGenerated()
       unsubTicketBooked()
     }
-  }, [clearWinnerQueue, loadGameData, playerPhone, selectedGameId, setActiveTheme, setTicketsFromBackend])
+  }, [clearWinnerQueue, refreshTicketsForGame, setActiveTheme, setTicketsFromBackend])
 
   useEffect(() => {
     if (!selectedGameId || storeGameId !== selectedGameId) return

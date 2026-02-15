@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
 import AnnouncementBanner from '@/components/common/AnnouncementBanner'
@@ -55,6 +55,8 @@ const Lobby = () => {
   const [now, setNow] = useState(Date.now())
   const [theme, setTheme] = useState(getActiveTheme())
   const [isThemeLocked, setIsThemeLocked] = useState(isAdminThemeActive())
+  const currentGameIdRef = useRef<string>('')
+  const ticketFetchRequestRef = useRef(0)
   const {
     gameId: storeGameId,
     tickets: liveTickets,
@@ -158,6 +160,41 @@ const Lobby = () => {
     }
   }, [playerPhone, searchParams, setActiveTheme, setTicketsFromBackend])
 
+  const fetchTicketsForGame = useCallback(
+    async (targetGameId: string) => {
+      const requestId = ticketFetchRequestRef.current + 1
+      ticketFetchRequestRef.current = requestId
+      try {
+        const latestTickets = await fetchGameTickets(targetGameId, playerPhone)
+        if (ticketFetchRequestRef.current !== requestId) return
+        if (currentGameIdRef.current !== targetGameId) return
+        setTicketsFromBackend(targetGameId, latestTickets)
+        setTickets(latestTickets)
+      } catch {
+        if (ticketFetchRequestRef.current !== requestId) return
+        if (currentGameIdRef.current !== targetGameId) return
+        setTicketsFromBackend(targetGameId, [])
+        setTickets([])
+      }
+    },
+    [playerPhone, setTicketsFromBackend],
+  )
+
+  useEffect(() => {
+    const nextGameId = selectedGame?.id ?? ''
+    currentGameIdRef.current = nextGameId
+    ticketFetchRequestRef.current += 1
+
+    if (!nextGameId) {
+      setTickets([])
+      return
+    }
+
+    setTickets([])
+    setTicketsFromBackend(nextGameId, [])
+    void fetchTicketsForGame(nextGameId)
+  }, [fetchTicketsForGame, selectedGame?.id, setTicketsFromBackend])
+
   useEffect(() => {
     const unsubNewGame = socketManager.subscribe('new_game_created', async (event: unknown) => {
       const payload = (event as { data?: PublicGame }).data
@@ -186,13 +223,9 @@ const Lobby = () => {
       setTicketsFromBackend(nextGameId, [])
 
       try {
-        const [state, latestTickets] = await Promise.all([
-          fetchGameState(nextGameId),
-          fetchGameTickets(nextGameId, playerPhone),
-        ])
+        const state = await fetchGameState(nextGameId)
+        if (currentGameIdRef.current !== nextGameId) return
         replaceFromBackendState(state)
-        setTicketsFromBackend(nextGameId, latestTickets)
-        setTickets(latestTickets)
       } catch {
         return
       }
@@ -201,15 +234,8 @@ const Lobby = () => {
     const unsubTicketsGenerated = socketManager.subscribe('tickets_generated', async (event: unknown) => {
       const payload = (event as { data?: { game_id?: string } }).data
       const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
-      if (!eventGameId || !selectedGame?.id || eventGameId !== selectedGame.id) return
-
-      try {
-        const latestTickets = await fetchGameTickets(eventGameId, playerPhone)
-        setTicketsFromBackend(eventGameId, latestTickets)
-        setTickets(latestTickets)
-      } catch {
-        return
-      }
+      if (!eventGameId || !currentGameIdRef.current || eventGameId !== currentGameIdRef.current) return
+      await fetchTicketsForGame(eventGameId)
     })
 
     const unsubTicketBooked = socketManager.subscribe('ticket_booked', async (event: unknown) => {
@@ -225,7 +251,7 @@ const Lobby = () => {
       ).data
 
       const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
-      if (!eventGameId || !selectedGame?.id || eventGameId !== selectedGame.id) return
+      if (!eventGameId || !currentGameIdRef.current || eventGameId !== currentGameIdRef.current) return
 
       const ticketId = typeof payload?.ticket_id === 'string' ? payload.ticket_id : ''
       if (ticketId) {
@@ -234,20 +260,17 @@ const Lobby = () => {
             ticket.id === ticketId
               ? {
                   ...ticket,
-                  status: typeof payload?.status === 'string' ? payload.status : ticket.status,
+                  status:
+                    typeof payload?.status === 'string'
+                      ? (payload.status as PlayerTicket['status'])
+                      : ticket.status,
                 }
               : ticket,
           ),
         )
       }
 
-      try {
-        const latestTickets = await fetchGameTickets(eventGameId, playerPhone)
-        setTicketsFromBackend(eventGameId, latestTickets)
-        setTickets(latestTickets)
-      } catch {
-        return
-      }
+      await fetchTicketsForGame(eventGameId)
     })
 
     return () => {
@@ -255,7 +278,7 @@ const Lobby = () => {
       unsubTicketsGenerated()
       unsubTicketBooked()
     }
-  }, [playerPhone, replaceFromBackendState, selectedGame?.id, setActiveTheme, setTicketsFromBackend])
+  }, [fetchTicketsForGame, replaceFromBackendState, setActiveTheme, setTicketsFromBackend])
 
   useEffect(() => {
     let mounted = true
@@ -275,26 +298,6 @@ const Lobby = () => {
       mounted = false
     }
   }, [replaceFromBackendState, selectedGame?.id])
-
-  useEffect(() => {
-    let mounted = true
-    const loadTickets = async () => {
-      if (!selectedGame?.id) return
-      try {
-        const gameTickets = await fetchGameTickets(selectedGame.id, playerPhone)
-        if (!mounted) return
-        setTicketsFromBackend(selectedGame.id, gameTickets)
-        setTickets(gameTickets)
-      } catch {
-        if (!mounted) return
-        setTickets([])
-      }
-    }
-    void loadTickets()
-    return () => {
-      mounted = false
-    }
-  }, [playerPhone, selectedGame?.id, setTicketsFromBackend])
 
   useEffect(() => {
     if (!selectedGame?.id || storeGameId !== selectedGame.id) return
