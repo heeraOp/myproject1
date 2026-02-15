@@ -35,6 +35,7 @@ class Game(models.Model):
     booking_status = models.CharField(max_length=10, choices=BookingStatus.choices)
     website_status = models.CharField(max_length=10, choices=WebsiteStatus.choices, default=WebsiteStatus.OPEN)
     active_theme = models.CharField(max_length=20, choices=Theme.choices, default=Theme.DARK)
+    is_active = models.BooleanField(default=False)
     calling_interval = models.PositiveIntegerField(default=10)
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
@@ -42,6 +43,15 @@ class Game(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     ended_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["is_active"],
+                condition=models.Q(is_active=True),
+                name="unique_active_game",
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.id} - {self.status}"

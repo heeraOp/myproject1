@@ -19,8 +19,7 @@ export const usePublicGames = () => {
     setError(null)
 
     try {
-      // Public side must only see the latest created game.
-      const response = await apiClient.get('/games/public/latest/')
+      const response = await apiClient.get('/games/public/current/')
       const mappedGames = response.data ? [mapPublicGame(response.data)] : []
       setGames(mappedGames)
     } catch (err) {

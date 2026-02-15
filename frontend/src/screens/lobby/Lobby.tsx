@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
 import AnnouncementBanner from '@/components/common/AnnouncementBanner'
-import { fetchLatestPublicGame } from '@/api/rest/games'
+import { fetchCurrentPublicGame } from '@/api/rest/games'
 import { fetchGameState } from '@/api/rest/gamePublic'
 import { fetchGameTickets } from '@/api/rest/tickets'
 import { socketManager } from '@/api/websocket/socketManager'
@@ -77,23 +77,23 @@ const Lobby = () => {
         setLoading(true)
         setError(null)
 
-        const latestGame = await fetchLatestPublicGame()
+        const currentGame = await fetchCurrentPublicGame()
         if (!mounted) return
 
-        if (!latestGame) {
+        if (!currentGame) {
           setGames([])
           setSelectedGame(null)
           setTickets([])
           return
         }
 
-        if (latestGame.active_theme) {
-          setAdminTheme(latestGame.active_theme)
+        if (currentGame.active_theme) {
+          setAdminTheme(currentGame.active_theme)
         }
 
-        // Public side should only ever see the latest game.
-        const game = latestGame
-        setGames([latestGame])
+        // Public side should only ever see the backend-active game.
+        const game = currentGame
+        setGames([currentGame])
         setSelectedGame(game)
 
         const gameTickets = await fetchGameTickets(game.id, playerPhone)

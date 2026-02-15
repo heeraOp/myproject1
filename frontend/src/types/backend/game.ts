@@ -11,4 +11,5 @@ export type PublicGame = {
   booking_status: BookingStatus
   website_status: WebsiteStatus
   active_theme?: ThemeName
+  is_active?: boolean
 }

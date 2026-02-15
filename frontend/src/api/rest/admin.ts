@@ -13,6 +13,7 @@ export type AdminGameListItem = {
   ticket_price: number
   agent_commission: number
   active_theme?: ThemeName
+  is_active?: boolean
 }
 
 export type GameSummaryResponse = {
@@ -138,6 +139,11 @@ export const getGameSummary = async (gameId: string): Promise<GameSummaryRespons
 
 export const listAdminGames = async (): Promise<AdminGameListItem[]> => {
   const response = await adminApiClient.get<AdminGameListItem[]>('/games/')
+  return response.data
+}
+
+export const getCurrentAdminGame = async (): Promise<AdminGameListItem> => {
+  const response = await adminApiClient.get<AdminGameListItem>('/games/current/')
   return response.data
 }
 

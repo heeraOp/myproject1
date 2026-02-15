@@ -6,8 +6,10 @@ export const fetchPublicGames = async (): Promise<PublicGame[]> => {
   return response.data
 }
 
-export const fetchLatestPublicGame = async (): Promise<PublicGame> => {
-  // Public side must only see the latest created game.
-  const response = await apiClient.get<PublicGame>('/games/public/latest/')
+export const fetchCurrentPublicGame = async (): Promise<PublicGame> => {
+  const response = await apiClient.get<PublicGame>('/games/public/current/')
   return response.data
 }
+
+// Backward-compatible alias; current endpoint is the authority.
+export const fetchLatestPublicGame = fetchCurrentPublicGame

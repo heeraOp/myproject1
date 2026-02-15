@@ -33,6 +33,13 @@ type WinnerAnnouncedEvent = {
   winner: Winner
 }
 
+type WinnerBroadcastEvent = {
+  type: 'winner'
+  winner_name: string
+  prize_name: string
+  ticket_number?: number | null
+}
+
 type AnnouncementEvent = {
   type: 'announcement'
   message: string
@@ -92,9 +99,23 @@ const isAnnouncementEvent = (payload: unknown): payload is AnnouncementEvent => 
   )
 }
 
+const isWinnerBroadcastEvent = (payload: unknown): payload is WinnerBroadcastEvent => {
+  if (!payload || typeof payload !== 'object') return false
+  const event = payload as Record<string, unknown>
+  return (
+    event.type === 'winner' &&
+    typeof event.winner_name === 'string' &&
+    typeof event.prize_name === 'string' &&
+    (event.ticket_number === undefined ||
+      event.ticket_number === null ||
+      Number.isInteger(event.ticket_number))
+  )
+}
+
 export const useGameSocket = (gameId?: string): void => {
   const applyBackendEvent = useGameStore((state) => state.applyBackendEvent)
   const replaceFromBackendState = useGameStore((state) => state.replaceFromBackendState)
+  const enqueueWinnerAnnouncement = useGameStore((state) => state.enqueueWinnerAnnouncement)
   const addAnnouncement = useAnnouncementStore((state) => state.addAnnouncement)
 
   useEffect(() => {
@@ -136,6 +157,18 @@ export const useGameSocket = (gameId?: string): void => {
         if (!isWinnerAnnouncedEvent(event)) return
         applyBackendEvent(event)
       }),
+      socketManager.subscribe('winner', (event: unknown) => {
+        if (!isWinnerBroadcastEvent(event)) return
+        enqueueWinnerAnnouncement({
+          id: `winner-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          winner_name: event.winner_name.trim() || 'Player',
+          prize_name: event.prize_name.trim() || 'Prize',
+          ticket_number:
+            typeof event.ticket_number === 'number' && Number.isInteger(event.ticket_number)
+              ? event.ticket_number
+              : null,
+        })
+      }),
       socketManager.subscribe('announcement', (event: unknown) => {
         if (!isAnnouncementEvent(event)) return
         const rawId = event.announcement_id
@@ -158,5 +191,5 @@ export const useGameSocket = (gameId?: string): void => {
       unsubs.forEach((unsubscribe) => unsubscribe())
       socketManager.disconnect()
     }
-  }, [gameId, applyBackendEvent, replaceFromBackendState, addAnnouncement])
+  }, [gameId, applyBackendEvent, replaceFromBackendState, enqueueWinnerAnnouncement, addAnnouncement])
 }

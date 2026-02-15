@@ -109,6 +109,21 @@ def _ticket_snapshot_context(game, viewer_phone=None):
     return context
 
 
+def _admin_game_payload(game):
+    return {
+        "id": str(game.id),
+        "date": game.game_datetime,
+        "status": game.status,
+        "booking_status": game.booking_status,
+        "website_status": game.website_status,
+        "total_tickets": game.total_ticket_limit,
+        "ticket_price": game.ticket_price,
+        "agent_commission": game.agent_commission,
+        "active_theme": game.active_theme,
+        "is_active": game.is_active,
+    }
+
+
 class AdminGameCreateSerializer(serializers.Serializer):
     date = serializers.DateTimeField(default_timezone=timezone.get_default_timezone())
     ticket_price = serializers.IntegerField(min_value=1)
@@ -458,22 +473,7 @@ class AdminGameListCreateView(APIView):
 
     def get(self, request):
         games = Game.objects.all().order_by("-game_datetime", "id")
-        data = []
-        for game in games:
-            data.append(
-                {
-                    "id": str(game.id),
-                    "date": game.game_datetime,
-                    "status": game.status,
-                    "booking_status": game.booking_status,
-                    "website_status": game.website_status,
-                    "total_tickets": game.total_ticket_limit,
-                    "ticket_price": game.ticket_price,
-                    "agent_commission": game.agent_commission,
-                    "active_theme": game.active_theme,
-                }
-            )
-        return Response(data)
+        return Response([_admin_game_payload(game) for game in games])
 
     def post(self, request):
         payload = request.data.copy()
@@ -495,48 +495,55 @@ class AdminGameListCreateView(APIView):
         website_status = validated["website_status"]
         active_theme = validated["active_theme"]
 
-        game = Game.objects.create(
-            status=Game.Status.CREATED,
-            booking_status=booking_status,
-            website_status=website_status,
-            game_datetime=game_datetime,
-            ticket_price=ticket_price,
-            agent_commission=agent_commission,
-            total_ticket_limit=total_tickets,
-            active_theme=active_theme,
-            created_by=request.user,
-        )
+        with transaction.atomic():
+            Game.objects.filter(is_active=True).update(is_active=False)
 
-        # Pre-generate all tickets immediately on game setup (avoid lazy generation).
-        if not Ticket.objects.filter(game=game).exists():
-            tickets = []
-            for ticket_number in range(1, total_tickets + 1):
-                ticket_data = generate_housie_ticket()
-                tickets.append(
-                    Ticket(
-                        game=game,
-                        ticket_number=ticket_number,
-                        ticket_type=Ticket.TicketType.RANDOM,
-                        ticket_data=ticket_data,
-                        status=Ticket.Status.OPEN,
+            game = Game.objects.create(
+                status=Game.Status.CREATED,
+                booking_status=booking_status,
+                website_status=website_status,
+                game_datetime=game_datetime,
+                ticket_price=ticket_price,
+                agent_commission=agent_commission,
+                total_ticket_limit=total_tickets,
+                active_theme=active_theme,
+                is_active=True,
+                created_by=request.user,
+            )
+
+            # Pre-generate all tickets immediately on game setup (avoid lazy generation).
+            if not Ticket.objects.filter(game=game).exists():
+                tickets = []
+                for ticket_number in range(1, total_tickets + 1):
+                    ticket_data = generate_housie_ticket()
+                    tickets.append(
+                        Ticket(
+                            game=game,
+                            ticket_number=ticket_number,
+                            ticket_type=Ticket.TicketType.RANDOM,
+                            ticket_data=ticket_data,
+                            status=Ticket.Status.OPEN,
+                        )
                     )
-                )
-            Ticket.objects.bulk_create(tickets)
+                Ticket.objects.bulk_create(tickets)
 
-        return Response(
-            {
-                "id": str(game.id),
-                "date": game.game_datetime,
-                "status": game.status,
-                "booking_status": game.booking_status,
-                "website_status": game.website_status,
-                "total_tickets": game.total_ticket_limit,
-                "ticket_price": game.ticket_price,
-                "agent_commission": game.agent_commission,
-                "active_theme": game.active_theme,
-            },
-            status=201,
-        )
+        return Response(_admin_game_payload(game), status=201)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class CurrentAdminGameView(APIView):
+    """
+    Admin-only endpoint to fetch the single active game.
+    """
+
+    permission_classes = [IsAdminRole]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def get(self, request):
+        game = Game.objects.filter(is_active=True).first()
+        if game is None:
+            return Response({"detail": "No active game found."}, status=404)
+        return Response(_admin_game_payload(game))
 
 
 class PublicGameSerializer(serializers.Serializer):
@@ -547,6 +554,7 @@ class PublicGameSerializer(serializers.Serializer):
     booking_status = serializers.CharField(read_only=True)
     website_status = serializers.CharField(read_only=True)
     active_theme = serializers.CharField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
 
 
 class PublicGameListView(APIView):
@@ -565,10 +573,21 @@ class LatestPublicGameView(APIView):
     authentication_classes = []
 
     def get(self, request):
-        # Public side must only see the latest created game.
-        game = Game.objects.order_by("-created_at", "-id").first()
+        # Backward-compatible alias that now returns the active game.
+        game = Game.objects.filter(is_active=True).first()
         if game is None:
-            return Response({"detail": "No games found."}, status=404)
+            return Response({"detail": "No active game found."}, status=404)
+        serializer = PublicGameSerializer(game)
+        return Response(serializer.data)
+
+
+class CurrentPublicGameView(APIView):
+    authentication_classes = []
+
+    def get(self, request):
+        game = Game.objects.filter(is_active=True).first()
+        if game is None:
+            return Response({"detail": "No active game found."}, status=404)
         serializer = PublicGameSerializer(game)
         return Response(serializer.data)
 

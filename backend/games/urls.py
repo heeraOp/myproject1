@@ -3,6 +3,8 @@ from django.urls import path
 from .views import (
     AdminGameAnnouncementView,
     AdminCallNextNumberView,
+    CurrentAdminGameView,
+    CurrentPublicGameView,
     AdminGameListCreateView,
     AdminGameThemeView,
     AdminPauseGameView,
@@ -21,7 +23,9 @@ from .views import (
 
 urlpatterns = [
     path("", AdminGameListCreateView.as_view(), name="admin-game-list-create"),
+    path("current/", CurrentAdminGameView.as_view(), name="admin-game-current"),
     path("public/", PublicGameListView.as_view(), name="public-game-list"),
+    path("public/current/", CurrentPublicGameView.as_view(), name="public-game-current"),
     path("public/latest/", LatestPublicGameView.as_view(), name="public-game-latest"),
     path("<uuid:game_id>/announce/", AdminGameAnnouncementView.as_view(), name="admin-game-announce"),
     # Compatibility route for clients that omit trailing slash.

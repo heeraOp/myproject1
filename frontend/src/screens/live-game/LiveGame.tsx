@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
 import AnnouncementBanner from '@/components/common/AnnouncementBanner'
-import { fetchLatestPublicGame } from '@/api/rest/games'
+import WinnerCelebrationOverlay from '@/components/common/WinnerCelebrationOverlay'
+import { fetchCurrentPublicGame } from '@/api/rest/games'
 import { fetchGameTickets } from '@/api/rest/tickets'
 import {
   fetchGameState,
@@ -71,7 +72,6 @@ const LiveGame = () => {
   const [historyWinners, setHistoryWinners] = useState<PublicWinner[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [winnerOverlay, setWinnerOverlay] = useState<PublicWinner | null>(null)
   const [theme, setTheme] = useState(getActiveTheme())
   const [isThemeLocked, setIsThemeLocked] = useState(isAdminThemeActive())
 
@@ -90,6 +90,7 @@ const LiveGame = () => {
     lockedPrizeTypes,
     replaceFromBackendState,
     setTicketsFromBackend,
+    clearWinnerQueue,
   } = useGameStore((state) => state)
   const {
     announcement: bingoAnnouncement,
@@ -107,7 +108,6 @@ const LiveGame = () => {
   }, [])
   const voiceMode = useVoiceModeStore((state) => state.mode)
   const setVoiceMode = useVoiceModeStore((state) => state.setMode)
-  const latestWinnerIdRef = useRef<number | null>(null)
 
   useGameSocket(selectedGameId || undefined)
 
@@ -115,19 +115,19 @@ const LiveGame = () => {
     let mounted = true
     const hydrateGames = async () => {
       try {
-        const latestGame = await fetchLatestPublicGame()
+        const currentGame = await fetchCurrentPublicGame()
         if (!mounted) return
-        if (!latestGame) {
+        if (!currentGame) {
           setGames([])
           setSelectedGameId('')
           return
         }
-        if (latestGame.active_theme) {
-          setAdminTheme(latestGame.active_theme)
+        if (currentGame.active_theme) {
+          setAdminTheme(currentGame.active_theme)
         }
-        // Public side should only ever see the latest game.
-        setGames([latestGame])
-        setSelectedGameId(latestGame.id)
+        // Public side should only ever see the backend-active game.
+        setGames([currentGame])
+        setSelectedGameId(currentGame.id)
       } catch {
         if (!mounted) return
         setError('Unable to load game list.')
@@ -167,8 +167,9 @@ const LiveGame = () => {
 
   useEffect(() => {
     if (!selectedGameId) return
+    clearWinnerQueue()
     void loadGameData(selectedGameId)
-  }, [loadGameData, selectedGameId])
+  }, [clearWinnerQueue, loadGameData, selectedGameId])
 
   useEffect(() => {
     if (!selectedGameId) return
@@ -201,26 +202,6 @@ const LiveGame = () => {
     if (!selectedGameId || storeGameId !== selectedGameId) return
     setTickets(liveTickets as PlayerTicket[])
   }, [liveTickets, selectedGameId, storeGameId])
-
-  useEffect(() => {
-    const latestWinner = liveWinners[liveWinners.length - 1]
-    if (!latestWinner?.id) return
-    if (latestWinnerIdRef.current === latestWinner.id) return
-    latestWinnerIdRef.current = latestWinner.id
-
-    const normalizedWinner: PublicWinner = {
-      id: latestWinner.id,
-      prize_type: latestWinner.prize_type,
-      prize_amount: latestWinner.prize_amount ?? 0,
-      ticket_number: latestWinner.ticket_number,
-      player_name: latestWinner.player_name ?? null,
-      won_at: latestWinner.won_at ?? new Date().toISOString(),
-    }
-
-    setWinnerOverlay(normalizedWinner)
-    const timer = window.setTimeout(() => setWinnerOverlay(null), 3500)
-    return () => window.clearTimeout(timer)
-  }, [liveWinners])
 
   const selectedGame = useMemo(
     () => games.find((game) => game.id === selectedGameId) ?? null,
@@ -274,6 +255,7 @@ const LiveGame = () => {
   return (
     <main className="live-shell">
       <AnnouncementBanner gameId={selectedGameId || undefined} />
+      <WinnerCelebrationOverlay />
       <section className="live-header-card">
         <div className="live-header-top">
           <h1>Live Tambola</h1>
@@ -444,15 +426,6 @@ const LiveGame = () => {
         </>
       )}
 
-      {winnerOverlay && (
-        <div className="winner-overlay" role="status" aria-live="polite">
-          <h3>Winner Announced</h3>
-          <p>{PRIZE_LABEL_MAP[winnerOverlay.prize_type] ?? winnerOverlay.prize_type}</p>
-          <p>
-            {winnerOverlay.player_name ?? 'Player'} (Ticket #{winnerOverlay.ticket_number})
-          </p>
-        </div>
-      )}
     </main>
   )
 }

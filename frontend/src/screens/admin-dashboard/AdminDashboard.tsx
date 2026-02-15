@@ -5,6 +5,7 @@ import {
   announceGame,
   bookTicket,
   createGamePrizes,
+  getCurrentAdminGame,
   deleteGamePrize,
   getGameBusinessSummary,
   getPrizeTypes,
@@ -374,7 +375,7 @@ const AdminDashboard = () => {
     [rehydrateGameState],
   )
 
-  // Primary bootstrap: choose current game from query param or first admin-visible game.
+  // Primary bootstrap: fetch authoritative active game from backend.
   useEffect(() => {
     let mounted = true
     const loadGames = async () => {
@@ -383,17 +384,21 @@ const AdminDashboard = () => {
         const adminGames = await listAdminGames()
         if (!mounted) return
         setGames(adminGames)
-        const queryGameId = searchParams.get('gameId') || ''
+
         if (isSetupMode) {
-          setGameId(queryGameId)
+          setGameId('')
           return
         }
-        if (queryGameId) {
-          const chosenGame = adminGames.find((item) => item.id === queryGameId)
-          setGameId(chosenGame ? chosenGame.id : queryGameId)
-          return
+
+        try {
+          const currentGame = await getCurrentAdminGame()
+          if (!mounted) return
+          setGameId(currentGame.id)
+        } catch (currentGameError) {
+          if (!mounted) return
+          setGameId('')
+          setPublicGamesError(`Unable to load active game: ${getErrorMessage(currentGameError)}`)
         }
-        setGameId(adminGames[0]?.id ?? '')
       } catch (loadGamesError) {
         if (!mounted) return
         setPublicGamesError(`Unable to load games: ${getErrorMessage(loadGamesError)}`)
@@ -403,7 +408,7 @@ const AdminDashboard = () => {
     return () => {
       mounted = false
     }
-  }, [isSetupMode, searchParams])
+  }, [isSetupMode])
 
   useEffect(() => {
     if (!gameId) return
@@ -548,11 +553,17 @@ const AdminDashboard = () => {
       })
 
       // New game creation flow: switch context to the newly created game.
-      const latestGames = await listAdminGames()
+      const [latestGames, currentGame] = await Promise.all([
+        listAdminGames(),
+        getCurrentAdminGame(),
+      ])
       setGames(latestGames)
       resetLiveState()
 
-      if (createdGame?.id) {
+      if (currentGame?.id) {
+        setGameId(currentGame.id)
+        navigate(`/admin?gameId=${currentGame.id}`, { replace: true })
+      } else if (createdGame?.id) {
         setGameId(createdGame.id)
         navigate(`/admin?gameId=${createdGame.id}`, { replace: true })
       }

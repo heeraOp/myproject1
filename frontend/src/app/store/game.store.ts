@@ -26,6 +26,13 @@ type Winner = {
   won_at?: string
 }
 
+export type WinnerAnnouncement = {
+  id: string
+  winner_name: string
+  prize_name: string
+  ticket_number: number | null
+}
+
 type WinnerAnnouncedEvent = {
   type: 'winner.announced'
   winner: Winner
@@ -66,12 +73,16 @@ type GameStateStore = {
   calledNumbers: number[]
   tickets: StoreTicket[]
   winners: Winner[]
+  winnerQueue: WinnerAnnouncement[]
   lockedPrizeTypes: string[]
   isInteractionFrozen: boolean
   canSubmitClaims: boolean
   applyBackendEvent: (event: BackendGameEvent) => void
   replaceFromBackendState: (payload: BackendGameStatePayload) => void
   setTicketsFromBackend: (gameId: string, tickets: StoreTicket[]) => void
+  enqueueWinnerAnnouncement: (winner: WinnerAnnouncement) => void
+  dismissWinnerAnnouncement: () => void
+  clearWinnerQueue: () => void
   reset: () => void
 }
 
@@ -83,6 +94,7 @@ const initialState = {
   calledNumbers: [] as number[],
   tickets: [] as StoreTicket[],
   winners: [] as Winner[],
+  winnerQueue: [] as WinnerAnnouncement[],
   lockedPrizeTypes: [] as string[],
   isInteractionFrozen: false as boolean,
   canSubmitClaims: true as boolean,
@@ -134,6 +146,13 @@ const withMarkedNumbers = (ticket: StoreTicket, calledSet: Set<number>, isFinal:
   ...ticket,
   marked_numbers: numbersInTicket(ticket).filter((value) => calledSet.has(value)),
   final_immutable: isFinal || Boolean(ticket.final_immutable),
+})
+
+const toWinnerAnnouncement = (winner: Winner): WinnerAnnouncement => ({
+  id: `winner-${winner.id}`,
+  winner_name: winner.player_name?.trim() || 'Player',
+  prize_name: winner.prize_type,
+  ticket_number: Number.isInteger(winner.ticket_number) ? winner.ticket_number : null,
 })
 
 export const useGameStore = create<GameStateStore>((set) => ({
@@ -205,10 +224,14 @@ export const useGameStore = create<GameStateStore>((set) => ({
         const lockedPrizeTypes = state.lockedPrizeTypes.includes(event.winner.prize_type)
           ? state.lockedPrizeTypes
           : [...state.lockedPrizeTypes, event.winner.prize_type]
+        const winnerQueue = winnerExists
+          ? state.winnerQueue
+          : [...state.winnerQueue, toWinnerAnnouncement(event.winner)]
 
         return {
           ...state,
           winners: winnerExists ? state.winners : [...state.winners, event.winner],
+          winnerQueue,
           lockedPrizeTypes,
         }
       }
@@ -245,6 +268,10 @@ export const useGameStore = create<GameStateStore>((set) => ({
         calledNumbers,
         tickets: nextTickets,
         winners: winnersFromState,
+        winnerQueue:
+          state.gameId && payload?.game?.id && state.gameId !== payload.game.id
+            ? []
+            : state.winnerQueue,
         lockedPrizeTypes,
         isInteractionFrozen: mappedStatus === 'FINISHED',
         canSubmitClaims: mappedStatus !== 'FINISHED',
@@ -260,5 +287,20 @@ export const useGameStore = create<GameStateStore>((set) => ({
         tickets: tickets.map((ticket) => withMarkedNumbers(ticket, calledSet, isFinal)),
       }
     }),
+  enqueueWinnerAnnouncement: (winner) =>
+    set((state) => ({
+      ...state,
+      winnerQueue: [...state.winnerQueue, winner],
+    })),
+  dismissWinnerAnnouncement: () =>
+    set((state) => ({
+      ...state,
+      winnerQueue: state.winnerQueue.length > 0 ? state.winnerQueue.slice(1) : state.winnerQueue,
+    })),
+  clearWinnerQueue: () =>
+    set((state) => ({
+      ...state,
+      winnerQueue: [],
+    })),
   reset: () => set(initialState),
 }))

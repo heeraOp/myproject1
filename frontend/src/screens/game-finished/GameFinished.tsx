@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import AnnouncementBanner from '@/components/common/AnnouncementBanner'
-import { fetchLatestPublicGame } from '@/api/rest/games'
+import { fetchCurrentPublicGame } from '@/api/rest/games'
 import {
   fetchGameBusinessSummary,
   fetchGameSummary,
@@ -69,19 +69,19 @@ const GameFinished = () => {
     let mounted = true
     const hydrateGames = async () => {
       try {
-        const latestGame = await fetchLatestPublicGame()
+        const currentGame = await fetchCurrentPublicGame()
         if (!mounted) return
-        if (!latestGame) {
+        if (!currentGame) {
           setGames([])
           setSelectedGameId('')
           return
         }
-        if (latestGame.active_theme) {
-          setAdminTheme(latestGame.active_theme)
+        if (currentGame.active_theme) {
+          setAdminTheme(currentGame.active_theme)
         }
-        // Public side should only ever see the latest game.
-        setGames([latestGame])
-        setSelectedGameId(latestGame.id)
+        // Public side should only ever see the backend-active game.
+        setGames([currentGame])
+        setSelectedGameId(currentGame.id)
       } catch {
         if (!mounted) return
         setError('Unable to load games.')
