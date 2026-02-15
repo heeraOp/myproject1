@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import AnnouncementBanner from '@/components/common/AnnouncementBanner'
 import { fetchLatestPublicGame } from '@/api/rest/games'
 import {
   fetchGameBusinessSummary,
@@ -18,6 +19,8 @@ import {
   subscribeThemeChange,
   toggleTheme,
 } from '@/utils/theme'
+import { formatDateTimeInIST } from '@/utils/dateTime'
+import { useGameSocket } from '@/app/hooks/useGameSocket'
 import './GameFinished.css'
 
 const PRIZE_LABEL_MAP: Record<string, string> = {
@@ -130,12 +133,15 @@ const GameFinished = () => {
     [games, selectedGameId],
   )
 
+  useGameSocket(selectedGameId || undefined)
+
   return (
     <main className="finished-shell">
+      <AnnouncementBanner gameId={selectedGameId || undefined} />
       <section className="finished-header">
         <div>
           <h1>Game Finished Summary</h1>
-          <p>{selectedGame ? new Date(selectedGame.date).toLocaleString() : '--'}</p>
+          <p>{selectedGame ? formatDateTimeInIST(selectedGame.date) : '--'}</p>
         </div>
         <div className="finished-header-actions">
           <button type="button" className="ghost-btn" onClick={() => navigate('/')}>
@@ -161,7 +167,7 @@ const GameFinished = () => {
           {!games.length && <option value="">No game</option>}
           {games.map((game) => (
             <option key={game.id} value={game.id}>
-              {new Date(game.date).toLocaleString()} ({game.status})
+              {formatDateTimeInIST(game.date)} ({game.status})
             </option>
           ))}
         </select>
@@ -229,7 +235,7 @@ const GameFinished = () => {
                       <td>{PRIZE_LABEL_MAP[winner.prize_type] ?? winner.prize_type}</td>
                       <td>{winner.player_name ?? 'Player'}</td>
                       <td>{winner.ticket_number}</td>
-                      <td>{new Date(winner.won_at).toLocaleString()}</td>
+                      <td>{formatDateTimeInIST(winner.won_at)}</td>
                     </tr>
                   ))}
                 </tbody>

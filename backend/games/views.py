@@ -1,6 +1,5 @@
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
-from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import serializers
@@ -12,14 +11,24 @@ from channels.layers import get_channel_layer
 from django.db import transaction
 from rest_framework.views import APIView
 
-from .models import Game
+from .models import Game, Announcement
+from .serializers import AnnouncementCreateSerializer
 from .utils.calling import call_next_number
 from .tasks import auto_call_numbers
 from claims.models import Claim, Winner, Prize
 from claims.utils.evaluator import evaluate_claims_for_game
 from claims.serializers import WinnerSerializer
 from tickets.models import Ticket
+from tickets.serializers import PlayerTicketSerializer, PublicTicketSerializer
 from tickets.utils.generator import generate_housie_ticket
+
+
+def _is_admin_user(user):
+    if not user or not user.is_authenticated:
+        return False
+    if getattr(user, "role", None) == "ADMIN":
+        return True
+    return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
 
 
 class IsAdminRole(BasePermission):
@@ -28,12 +37,7 @@ class IsAdminRole(BasePermission):
     """
 
     def has_permission(self, request, view):
-        user = request.user
-        if not user or not user.is_authenticated:
-            return False
-        if getattr(user, "role", None) == "ADMIN":
-            return True
-        return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+        return _is_admin_user(request.user)
 
 
 class CsrfExemptSessionAuthentication(SessionAuthentication):
@@ -93,6 +97,46 @@ def _clear_claim_progress(game):
     game.prizes.filter(is_claimed=True).update(is_claimed=False)
 
 
+def _ticket_snapshot_context(game, viewer_phone=None):
+    called_numbers = list(game.called_numbers.values_list("number", flat=True))
+    context = {
+        "called_numbers": called_numbers,
+        "called_numbers_set": set(called_numbers),
+        "final_immutable": game.status == Game.Status.FINISHED,
+    }
+    if viewer_phone is not None:
+        context["viewer_phone"] = viewer_phone
+    return context
+
+
+class AdminGameCreateSerializer(serializers.Serializer):
+    date = serializers.DateTimeField(default_timezone=timezone.get_default_timezone())
+    ticket_price = serializers.IntegerField(min_value=1)
+    total_tickets = serializers.IntegerField(min_value=1)
+    agent_commission = serializers.IntegerField(min_value=0, required=False, default=0)
+    booking_status = serializers.ChoiceField(
+        choices=Game.BookingStatus.choices,
+        required=False,
+        default=Game.BookingStatus.OPEN,
+    )
+    website_status = serializers.ChoiceField(
+        choices=Game.WebsiteStatus.choices,
+        required=False,
+        default=Game.WebsiteStatus.OPEN,
+    )
+    active_theme = serializers.ChoiceField(
+        choices=Game.Theme.choices,
+        required=False,
+        default=Game.Theme.DARK,
+    )
+
+    def validate_date(self, value):
+        default_tz = timezone.get_default_timezone()
+        if timezone.is_naive(value):
+            return timezone.make_aware(value, default_tz)
+        return timezone.localtime(value, default_tz)
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class AdminResetCallView(APIView):
     """
@@ -108,11 +152,13 @@ class AdminResetCallView(APIView):
 
             if game.status == Game.Status.RUNNING:
                 return Response({"detail": "Cannot reset calls while game is RUNNING."}, status=400)
+            if game.status == Game.Status.FINISHED:
+                return Response({"detail": "Cannot reset calls after game is FINISHED."}, status=400)
 
             deleted_called, _ = game.called_numbers.all().delete()
             _clear_claim_progress(game)
 
-            if game.status in (Game.Status.PAUSED, Game.Status.FINISHED):
+            if game.status == Game.Status.PAUSED:
                 game.status = Game.Status.CREATED
                 game.ended_at = None
                 game.save(update_fields=["status", "ended_at"])
@@ -135,6 +181,8 @@ class AdminResetTicketView(APIView):
 
             if game.status == Game.Status.RUNNING:
                 return Response({"detail": "Cannot reset tickets while game is RUNNING."}, status=400)
+            if game.status == Game.Status.FINISHED:
+                return Response({"detail": "Cannot reset tickets after game is FINISHED."}, status=400)
 
             updated = game.tickets.update(
                 player_name=None,
@@ -164,6 +212,8 @@ class AdminResetAgentView(APIView):
 
             if game.status == Game.Status.RUNNING:
                 return Response({"detail": "Cannot reset agents while game is RUNNING."}, status=400)
+            if game.status == Game.Status.FINISHED:
+                return Response({"detail": "Cannot reset agents after game is FINISHED."}, status=400)
 
             updated = game.tickets.update(
                 player_name=None,
@@ -353,6 +403,51 @@ class AdminCallNextNumberView(APIView):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
+class AdminGameAnnouncementView(APIView):
+    """
+    Admin-only endpoint to broadcast announcements to all connected players.
+    This communication layer is independent of game lifecycle/calling logic.
+    """
+
+    permission_classes = [IsAdminRole]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def post(self, request, game_id):
+        game = get_object_or_404(Game, id=game_id)
+        serializer = AnnouncementCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            first_error_key = next(iter(serializer.errors), None)
+            first_error = serializer.errors.get(first_error_key, ["Invalid payload."])[0]
+            return Response({"detail": str(first_error)}, status=400)
+
+        message = serializer.validated_data["message"]
+        announcement = Announcement.objects.create(
+            game=game,
+            message=message,
+            created_by=request.user if request.user.is_authenticated else None,
+            is_active=True,
+        )
+
+        payload = {
+            "message": announcement.message,
+            "timestamp": timezone.localtime(announcement.created_at).isoformat(),
+            "game_id": str(game.id),
+            "announcement_id": announcement.id,
+        }
+
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"game_{str(game.id)}",
+            {
+                "type": "announcement_broadcast",
+                **payload,
+            },
+        )
+
+        return Response(payload, status=201)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class AdminGameListCreateView(APIView):
     """
     Admin-only endpoint to create and list games.
@@ -381,50 +476,24 @@ class AdminGameListCreateView(APIView):
         return Response(data)
 
     def post(self, request):
-        game_datetime_raw = request.data.get("date") or request.data.get("game_datetime")
-        if not game_datetime_raw:
-            return Response({"detail": "date is required."}, status=400)
+        payload = request.data.copy()
+        if not payload.get("date") and payload.get("game_datetime"):
+            payload["date"] = payload.get("game_datetime")
 
-        game_datetime = parse_datetime(str(game_datetime_raw))
-        if game_datetime is None:
-            return Response({"detail": "date must be an ISO 8601 datetime string."}, status=400)
+        serializer = AdminGameCreateSerializer(data=payload)
+        if not serializer.is_valid():
+            first_error_key = next(iter(serializer.errors), None)
+            first_error = serializer.errors.get(first_error_key, ["Invalid payload."])[0]
+            return Response({"detail": str(first_error)}, status=400)
 
-        if timezone.is_naive(game_datetime):
-            game_datetime = timezone.make_aware(game_datetime, timezone.get_current_timezone())
-
-        try:
-            ticket_price = int(request.data.get("ticket_price"))
-        except (TypeError, ValueError):
-            return Response({"detail": "ticket_price must be an integer."}, status=400)
-
-        try:
-            total_tickets = int(request.data.get("total_tickets"))
-        except (TypeError, ValueError):
-            return Response({"detail": "total_tickets must be an integer."}, status=400)
-
-        try:
-            agent_commission = int(request.data.get("agent_commission", 0))
-        except (TypeError, ValueError):
-            return Response({"detail": "agent_commission must be an integer."}, status=400)
-
-        booking_status = str(request.data.get("booking_status", Game.BookingStatus.OPEN)).upper()
-        if booking_status not in {choice[0] for choice in Game.BookingStatus.choices}:
-            return Response({"detail": "Invalid booking_status."}, status=400)
-
-        website_status = str(request.data.get("website_status", Game.WebsiteStatus.OPEN)).upper()
-        if website_status not in {choice[0] for choice in Game.WebsiteStatus.choices}:
-            return Response({"detail": "Invalid website_status."}, status=400)
-
-        active_theme = str(request.data.get("active_theme", Game.Theme.DARK))
-        if active_theme not in {choice[0] for choice in Game.Theme.choices}:
-            return Response({"detail": "Invalid active_theme."}, status=400)
-
-        if ticket_price <= 0:
-            return Response({"detail": "ticket_price must be greater than 0."}, status=400)
-        if total_tickets <= 0:
-            return Response({"detail": "total_tickets must be greater than 0."}, status=400)
-        if agent_commission < 0:
-            return Response({"detail": "agent_commission cannot be negative."}, status=400)
+        validated = serializer.validated_data
+        game_datetime = validated["date"]
+        ticket_price = validated["ticket_price"]
+        total_tickets = validated["total_tickets"]
+        agent_commission = validated["agent_commission"]
+        booking_status = validated["booking_status"]
+        website_status = validated["website_status"]
+        active_theme = validated["active_theme"]
 
         game = Game.objects.create(
             status=Game.Status.CREATED,
@@ -541,6 +610,51 @@ class GameStateView(APIView):
                 },
                 "called_numbers": called_numbers,
                 "won_prizes": won_prizes,
+            }
+        )
+
+
+class GameTicketsView(APIView):
+    authentication_classes = [SessionAuthentication]
+
+    def get(self, request, game_id):
+        game = get_object_or_404(Game, id=game_id)
+
+        tickets = Ticket.objects.filter(game=game)
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            status_value = str(status_filter).upper()
+            valid_statuses = {choice[0] for choice in Ticket.Status.choices}
+            if status_value not in valid_statuses:
+                return Response({"detail": "Invalid status filter."}, status=400)
+            tickets = tickets.filter(status=status_value)
+
+        tickets = tickets.order_by("ticket_number")
+        viewer_phone = request.query_params.get("player_phone")
+        serializer_context = _ticket_snapshot_context(game, viewer_phone=viewer_phone)
+
+        if _is_admin_user(request.user):
+            serializer = PlayerTicketSerializer(
+                tickets,
+                many=True,
+                context=serializer_context,
+            )
+        else:
+            serializer = PublicTicketSerializer(
+                tickets,
+                many=True,
+                context=serializer_context,
+            )
+
+        return Response(
+            {
+                "game": {
+                    "id": str(game.id),
+                    "status": game.status,
+                },
+                "final_immutable": game.status == Game.Status.FINISHED,
+                "called_numbers": serializer_context["called_numbers"],
+                "tickets": serializer.data,
             }
         )
 

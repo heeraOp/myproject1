@@ -4,30 +4,34 @@ import './TambolaTicketCard.css'
 
 type TambolaTicketCardProps = {
   ticket: PlayerTicket
-  calledNumbers?: number[]
+  variant?: 'admin' | 'player'
 }
 
-const TambolaTicketCard = ({ ticket, calledNumbers }: TambolaTicketCardProps) => {
+const TambolaTicketCard = ({ ticket, variant = 'admin' }: TambolaTicketCardProps) => {
   const isBooked = ticket.status === 'BOOKED'
-  const calledSet = useMemo(() => new Set(calledNumbers ?? []), [calledNumbers])
-  const ownerLabel = isBooked
-    ? ticket.player_name && ticket.player_name.trim().length > 0
-      ? ticket.player_name
-      : 'booked'
-    : 'open'
-  // Append player name to BOOKED status without changing layout.
-  const statusLabel = isBooked
-    ? ticket.player_name && ticket.player_name.trim().length > 0
-      ? `BOOKED : ${ticket.player_name}`
-      : 'BOOKED'
-    : 'OPEN'
+  const markedSet = useMemo(() => new Set(ticket.marked_numbers ?? []), [ticket.marked_numbers])
+  const normalizedPlayerName = ticket.player_name?.trim() || ''
+
+  let ownerLabel = `${ticket.ticket_number}:(open)`
+  let statusLabel = 'OPEN'
+
+  if (variant === 'player') {
+    let displayName = 'AVAILABLE'
+    if (ticket.status === 'BOOKED' && normalizedPlayerName) {
+      displayName = normalizedPlayerName
+    }
+    ownerLabel = `${ticket.ticket_number}:(${displayName})`
+    statusLabel = ticket.status === 'BOOKED' ? `BOOKED : ${displayName}` : 'AVAILABLE'
+  } else {
+    const ownerName = isBooked ? (normalizedPlayerName || 'booked') : 'open'
+    ownerLabel = `${ticket.ticket_number}:(${ownerName})`
+    statusLabel = isBooked ? (normalizedPlayerName ? `BOOKED : ${normalizedPlayerName}` : 'BOOKED') : 'OPEN'
+  }
 
   return (
     <article className="ticket-card">
       <header className="ticket-card__header">
-        <span className="ticket-owner">
-          {ticket.ticket_number}:({ownerLabel})
-        </span>
+        <span className="ticket-owner">{ownerLabel}</span>
         <span className={`ticket-status ${isBooked ? 'booked' : 'open'}`}>
           {statusLabel}
         </span>
@@ -36,10 +40,10 @@ const TambolaTicketCard = ({ ticket, calledNumbers }: TambolaTicketCardProps) =>
         <div className="ticket-grid">
           {ticket.ticket_data.rows.map((row, rowIndex) =>
             row.map((value, cellIndex) => {
-              const isCalled = isBooked && value !== null && calledSet.has(value)
+              const isMarked = value !== null && markedSet.has(value)
               return (
                 <div
-                  className={`ticket-cell ${isCalled ? 'called' : ''}`}
+                  className={`ticket-cell ${isMarked ? 'called' : ''}`}
                   key={`${ticket.ticket_number}-${rowIndex}-${cellIndex}`}
                 >
                   {value ?? ''}

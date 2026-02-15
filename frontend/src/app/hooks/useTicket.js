@@ -7,6 +7,8 @@ const mapTicket = (ticket) => ({
   status: ticket.status,
   ticket_data: ticket.ticket_data,
   player_name: ticket.player_name,
+  marked_numbers: Array.isArray(ticket.marked_numbers) ? ticket.marked_numbers : [],
+  final_immutable: Boolean(ticket.final_immutable),
 })
 
 export const useTicket = (gameId, ticketNumber) => {

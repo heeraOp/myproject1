@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { socketManager } from '@/api/websocket/socketManager'
+import { useAnnouncementStore } from '@/app/store/announcement.store'
 import { useGameStore } from '@/app/store/game.store'
 import { REST_BASE_URL } from '@/config'
 
@@ -32,7 +33,15 @@ type WinnerAnnouncedEvent = {
   winner: Winner
 }
 
-type SocketEvent = GameStartedEvent | NumberCalledEvent | GameFinishedEvent | WinnerAnnouncedEvent
+type AnnouncementEvent = {
+  type: 'announcement'
+  message: string
+  timestamp: string
+  game_id: string
+  announcement_id?: number
+}
+
+type EngineSocketEvent = GameStartedEvent | NumberCalledEvent | GameFinishedEvent | WinnerAnnouncedEvent
 
 type GameStateResponse = {
   game: {
@@ -72,10 +81,21 @@ const isWinnerAnnouncedEvent = (payload: unknown): payload is WinnerAnnouncedEve
   )
 }
 
+const isAnnouncementEvent = (payload: unknown): payload is AnnouncementEvent => {
+  if (!payload || typeof payload !== 'object') return false
+  const event = payload as Record<string, unknown>
+  return (
+    event.type === 'announcement' &&
+    typeof event.message === 'string' &&
+    typeof event.timestamp === 'string' &&
+    typeof event.game_id === 'string'
+  )
+}
+
 export const useGameSocket = (gameId?: string): void => {
   const applyBackendEvent = useGameStore((state) => state.applyBackendEvent)
   const replaceFromBackendState = useGameStore((state) => state.replaceFromBackendState)
-  const reset = useGameStore((state) => state.reset)
+  const addAnnouncement = useAnnouncementStore((state) => state.addAnnouncement)
 
   useEffect(() => {
     if (!gameId) return
@@ -103,18 +123,30 @@ export const useGameSocket = (gameId?: string): void => {
 
     const unsubs = [
       socketManager.subscribe('game.started', (event: unknown) => {
-        applyBackendEvent(event as SocketEvent)
+        applyBackendEvent(event as EngineSocketEvent)
       }),
       socketManager.subscribe('number.called', (event: unknown) => {
         if (!isNumberCalledEvent(event)) return
         applyBackendEvent(event)
       }),
       socketManager.subscribe('game.finished', (event: unknown) => {
-        applyBackendEvent(event as SocketEvent)
+        applyBackendEvent(event as EngineSocketEvent)
       }),
       socketManager.subscribe('winner.announced', (event: unknown) => {
         if (!isWinnerAnnouncedEvent(event)) return
         applyBackendEvent(event)
+      }),
+      socketManager.subscribe('announcement', (event: unknown) => {
+        if (!isAnnouncementEvent(event)) return
+        const rawId = event.announcement_id
+        const numericId =
+          typeof rawId === 'number' && Number.isInteger(rawId) ? rawId : Date.now() + Math.random()
+        addAnnouncement({
+          id: Number(numericId),
+          gameId: event.game_id,
+          message: event.message,
+          timestamp: event.timestamp,
+        })
       }),
       socketManager.on('reconnect', () => {
         void recoverState()
@@ -125,7 +157,6 @@ export const useGameSocket = (gameId?: string): void => {
       isActive = false
       unsubs.forEach((unsubscribe) => unsubscribe())
       socketManager.disconnect()
-      reset()
     }
-  }, [gameId, applyBackendEvent, replaceFromBackendState, reset])
+  }, [gameId, applyBackendEvent, replaceFromBackendState, addAnnouncement])
 }

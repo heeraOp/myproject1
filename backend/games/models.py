@@ -59,3 +59,20 @@ class CalledNumber(models.Model):
 
     def __str__(self) -> str:
         return f"{self.game_id} - {self.number}"
+
+
+class Announcement(models.Model):
+    game = models.ForeignKey(Game, on_delete=models.CASCADE, related_name="announcements")
+    message = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="game_announcements",
+    )
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self) -> str:
+        return f"{self.game_id} announcement @ {self.created_at.isoformat()}"

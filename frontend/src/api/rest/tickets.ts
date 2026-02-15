@@ -1,21 +1,23 @@
 import { apiClient } from '@/api/rest/client'
 import type { PlayerTicket } from '@/types/backend/ticket'
 
+export type GameTicketsSnapshotResponse = {
+  game: {
+    id: string
+    status: string
+  }
+  final_immutable: boolean
+  called_numbers: number[]
+  tickets: PlayerTicket[]
+}
+
 export const fetchGameTickets = async (
   gameId: string,
   playerPhone?: string,
 ): Promise<PlayerTicket[]> => {
-  // Use the public tickets endpoint to avoid exposing other players' data.
-  const response = await apiClient.get<PlayerTicket[]>(`/tickets/game/${gameId}/public/`, {
+  // Use the canonical game tickets snapshot endpoint used by admin as well.
+  const response = await apiClient.get<GameTicketsSnapshotResponse>(`/games/${gameId}/tickets/`, {
     params: playerPhone ? { player_phone: playerPhone } : undefined,
   })
-  return response.data
-}
-
-export const fetchLatestGameTickets = async (playerPhone?: string): Promise<PlayerTicket[]> => {
-  // Public side must only see tickets for the latest game.
-  const response = await apiClient.get<PlayerTicket[]>('/tickets/public/latest/', {
-    params: playerPhone ? { player_phone: playerPhone } : undefined,
-  })
-  return response.data
+  return Array.isArray(response.data?.tickets) ? response.data.tickets : []
 }

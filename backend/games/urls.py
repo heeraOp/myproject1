@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AdminGameAnnouncementView,
     AdminCallNextNumberView,
     AdminGameListCreateView,
     AdminGameThemeView,
@@ -13,6 +14,7 @@ from .views import (
     GameBusinessSummaryView,
     GameStateView,
     GameSummaryView,
+    GameTicketsView,
     LatestPublicGameView,
     PublicGameListView,
 )
@@ -21,7 +23,11 @@ urlpatterns = [
     path("", AdminGameListCreateView.as_view(), name="admin-game-list-create"),
     path("public/", PublicGameListView.as_view(), name="public-game-list"),
     path("public/latest/", LatestPublicGameView.as_view(), name="public-game-latest"),
+    path("<uuid:game_id>/announce/", AdminGameAnnouncementView.as_view(), name="admin-game-announce"),
+    # Compatibility route for clients that omit trailing slash.
+    path("<uuid:game_id>/announce", AdminGameAnnouncementView.as_view(), name="admin-game-announce-no-slash"),
     path("<uuid:game_id>/state/", GameStateView.as_view(), name="game-state"),
+    path("<uuid:game_id>/tickets/", GameTicketsView.as_view(), name="game-tickets"),
     path("<uuid:game_id>/summary/", GameSummaryView.as_view(), name="game-summary"),
     path("<uuid:game_id>/business-summary/", GameBusinessSummaryView.as_view(), name="game-business-summary"),
     path("admin/<uuid:game_id>/start/", AdminStartGameView.as_view(), name="admin-game-start"),

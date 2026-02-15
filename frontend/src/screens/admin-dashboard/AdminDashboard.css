@@ -249,6 +249,26 @@
   background: var(--color-f0f2ff);
 }
 
+.announcement-help {
+  margin: 0 0 10px;
+  color: var(--color-d9e0ff);
+  font-weight: 600;
+}
+
+.announcement-form {
+  display: grid;
+  gap: 10px;
+}
+
+.announcement-form textarea {
+  min-height: 84px;
+  resize: vertical;
+  border: 2px solid var(--color-0a0e3d);
+  border-radius: 8px;
+  padding: 10px;
+  font-weight: 600;
+}
+
 .action-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

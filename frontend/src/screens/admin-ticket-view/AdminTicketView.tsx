@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
 import {
-  getGameState,
   getGameSummary,
   getTickets,
   type GameSummaryResponse,
   type TicketResponse,
 } from '@/api/rest/admin'
+import { socketManager } from '@/api/websocket/socketManager'
 import { useGameSocket } from '@/app/hooks/useGameSocket'
 import { useGameStore } from '@/app/store/game.store'
 import '@/screens/admin-dashboard/AdminDashboard.css'
@@ -21,10 +21,12 @@ const AdminTicketView = () => {
   const [error, setError] = useState('')
   const [showAll, setShowAll] = useState(true)
   const [summary, setSummary] = useState<GameSummaryResponse | null>(null)
-  const calledNumbers = useGameStore((state) => state.calledNumbers)
-  const replaceFromBackendState = useGameStore((state) => state.replaceFromBackendState)
+  const {
+    gameId: storeGameId,
+    tickets: liveTickets,
+    setTicketsFromBackend,
+  } = useGameStore((state) => state)
 
-  // Keep called numbers synced via existing game websocket events.
   useGameSocket(gameId || undefined)
 
   useEffect(() => {
@@ -52,28 +54,6 @@ const AdminTicketView = () => {
   useEffect(() => {
     let mounted = true
 
-    const loadState = async () => {
-      if (!gameId) return
-      try {
-        const state = await getGameState(gameId)
-        if (!mounted) return
-        // Seed called numbers so ticket marking is accurate on refresh.
-        replaceFromBackendState(state)
-      } catch {
-        return
-      }
-    }
-
-    void loadState()
-
-    return () => {
-      mounted = false
-    }
-  }, [gameId, replaceFromBackendState])
-
-  useEffect(() => {
-    let mounted = true
-
     const loadTickets = async () => {
       if (!gameId) {
         setTickets([])
@@ -85,8 +65,9 @@ const AdminTicketView = () => {
       setError('')
 
       try {
-        const data = await getTickets(gameId, showAll ? undefined : 'BOOKED')
+        const data = await getTickets(gameId)
         if (!mounted) return
+        setTicketsFromBackend(gameId, data)
         setTickets(data)
       } catch {
         if (!mounted) return
@@ -103,11 +84,32 @@ const AdminTicketView = () => {
     return () => {
       mounted = false
     }
-  }, [gameId, showAll])
+  }, [gameId, setTicketsFromBackend])
 
-  const bookedCount = useMemo(
-    () => tickets.filter((ticket) => ticket.status === 'BOOKED').length,
-    [tickets],
+  useEffect(() => {
+    if (!gameId || storeGameId !== gameId) return
+    setTickets(liveTickets as TicketResponse[])
+  }, [gameId, liveTickets, storeGameId])
+
+  useEffect(() => {
+    if (!gameId) return
+    const unsubscribe = socketManager.subscribe('ticket.booked', async () => {
+      try {
+        const latestTickets = await getTickets(gameId)
+        setTicketsFromBackend(gameId, latestTickets)
+        setTickets(latestTickets)
+      } catch {
+        return
+      }
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [gameId, setTicketsFromBackend])
+
+  const visibleTickets = useMemo(
+    () => (showAll ? tickets : tickets.filter((ticket) => ticket.status === 'BOOKED')),
+    [showAll, tickets],
   )
 
   return (
@@ -139,17 +141,16 @@ const AdminTicketView = () => {
       {!loading && !error && (
         <section className="admin-card">
           <h2>
-            Tickets ({showAll ? tickets.length : bookedCount}){showAll ? '' : ' booked'}
+            Tickets ({showAll ? tickets.length : visibleTickets.length}){showAll ? '' : ' booked'}
           </h2>
-          {tickets.length === 0 ? (
+          {visibleTickets.length === 0 ? (
             <div className="admin-message">No tickets found for this view.</div>
           ) : (
             <div>
-              {tickets.map((ticket) => (
+              {visibleTickets.map((ticket) => (
                 <TambolaTicketCard
                   key={ticket.ticket_number}
                   ticket={ticket}
-                  calledNumbers={calledNumbers}
                 />
               ))}
             </div>

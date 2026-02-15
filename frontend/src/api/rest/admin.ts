@@ -1,5 +1,19 @@
 import { adminApiClient } from '@/api/rest/client'
 import type { ThemeName } from '@/types/backend/game'
+import type { TicketData, TicketStatus, TicketType } from '@/types/backend/ticket'
+import { toISOStringFromInput } from '@/utils/dateTime'
+
+export type AdminGameListItem = {
+  id: string
+  date: string
+  status: string
+  booking_status: string
+  website_status: string
+  total_tickets: number
+  ticket_price: number
+  agent_commission: number
+  active_theme?: ThemeName
+}
 
 export type GameSummaryResponse = {
   game: {
@@ -87,19 +101,43 @@ export type WinnerResponse = {
   won_at: string
 }
 
+export type AnnouncementResponse = {
+  announcement_id: number
+  message: string
+  timestamp: string
+  game_id: string
+}
+
+const normalizeGameId = (value: string): string => value.trim().replace(/^\/+|\/+$/g, '')
+
 export type TicketResponse = {
   ticket_number: number
-  ticket_type: string
-  status: string
-  ticket_data: {
-    rows: Array<Array<number | null>>
-  }
+  ticket_type: TicketType
+  status: TicketStatus
+  ticket_data: TicketData
   player_name: string | null
   player_phone?: string | null
+  marked_numbers: number[]
+  final_immutable: boolean
+}
+
+export type GameTicketsSnapshotResponse = {
+  game: {
+    id: string
+    status: string
+  }
+  final_immutable: boolean
+  called_numbers: number[]
+  tickets: TicketResponse[]
 }
 
 export const getGameSummary = async (gameId: string): Promise<GameSummaryResponse> => {
   const response = await adminApiClient.get<GameSummaryResponse>(`/games/${gameId}/summary/`)
+  return response.data
+}
+
+export const listAdminGames = async (): Promise<AdminGameListItem[]> => {
+  const response = await adminApiClient.get<AdminGameListItem[]>('/games/')
   return response.data
 }
 
@@ -173,10 +211,49 @@ export const getTickets = async (
   gameId: string,
   status?: 'OPEN' | 'BOOKED',
 ): Promise<TicketResponse[]> => {
-  const response = await adminApiClient.get<TicketResponse[]>(`/tickets/game/${gameId}/`, {
+  const response = await adminApiClient.get<GameTicketsSnapshotResponse>(`/games/${gameId}/tickets/`, {
+    params: status ? { status } : undefined,
+  })
+  return Array.isArray(response.data?.tickets) ? response.data.tickets : []
+}
+
+export const getGameTicketsSnapshot = async (
+  gameId: string,
+  status?: 'OPEN' | 'BOOKED',
+): Promise<GameTicketsSnapshotResponse> => {
+  const response = await adminApiClient.get<GameTicketsSnapshotResponse>(`/games/${gameId}/tickets/`, {
     params: status ? { status } : undefined,
   })
   return response.data
+}
+
+export type RehydratedGameState = {
+  summary: GameSummaryResponse
+  state: GameStateResponse
+  business: GameBusinessSummaryResponse
+  prizes: PrizeResponse[]
+  ticketsSnapshot: GameTicketsSnapshotResponse
+  winners: WinnerResponse[]
+}
+
+export const loadGameState = async (gameId: string): Promise<RehydratedGameState> => {
+  const [summary, state, business, prizes, ticketsSnapshot, winners] = await Promise.all([
+    getGameSummary(gameId),
+    getGameState(gameId),
+    getGameBusinessSummary(gameId),
+    getPrizes(gameId),
+    getGameTicketsSnapshot(gameId),
+    getWinners(gameId),
+  ])
+
+  return {
+    summary,
+    state,
+    business,
+    prizes,
+    ticketsSnapshot,
+    winners,
+  }
 }
 
 export const getWinners = async (gameId: string): Promise<WinnerResponse[]> => {
@@ -212,7 +289,15 @@ export const saveGameSettings = async (payload: {
   booking_status: string
   website_status: string
 }) => {
-  const response = await adminApiClient.post('/games/', payload)
+  const dateIso = toISOStringFromInput(payload.date)
+  if (!dateIso) {
+    throw new Error('Please select a valid game date and time.')
+  }
+
+  const response = await adminApiClient.post('/games/', {
+    ...payload,
+    date: dateIso,
+  })
   return response.data
 }
 
@@ -257,6 +342,18 @@ export const updateActiveTheme = async (gameId: string, activeTheme: ThemeName) 
   const response = await adminApiClient.post<{ active_theme: ThemeName }>(
     `/games/admin/${gameId}/theme/`,
     { active_theme: activeTheme },
+  )
+  return response.data
+}
+
+export const announceGame = async (
+  gameId: string,
+  message: string,
+): Promise<AnnouncementResponse> => {
+  const normalizedGameId = normalizeGameId(gameId)
+  const response = await adminApiClient.post<AnnouncementResponse>(
+    `/games/${normalizedGameId}/announce/`,
+    { message },
   )
   return response.data
 }

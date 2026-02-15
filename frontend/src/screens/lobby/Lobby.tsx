@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
+import AnnouncementBanner from '@/components/common/AnnouncementBanner'
 import { fetchLatestPublicGame } from '@/api/rest/games'
 import { fetchGameState } from '@/api/rest/gamePublic'
-import { fetchLatestGameTickets } from '@/api/rest/tickets'
+import { fetchGameTickets } from '@/api/rest/tickets'
 import { socketManager } from '@/api/websocket/socketManager'
 import { useGameSocket } from '@/app/hooks/useGameSocket'
 import { useGameStore } from '@/app/store/game.store'
@@ -17,16 +18,15 @@ import {
   subscribeThemeChange,
   toggleTheme,
 } from '@/utils/theme'
+import { formatDateInIST, formatTimeInIST } from '@/utils/dateTime'
 import './Lobby.css'
 
 const formatClock = (dateValue: string): string => {
-  const date = new Date(dateValue)
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return formatTimeInIST(dateValue)
 }
 
 const formatDate = (dateValue: string): string => {
-  const date = new Date(dateValue)
-  return date.toLocaleDateString()
+  return formatDateInIST(dateValue)
 }
 
 const Lobby = () => {
@@ -42,8 +42,12 @@ const Lobby = () => {
   const [now, setNow] = useState(Date.now())
   const [theme, setTheme] = useState(getActiveTheme())
   const [isThemeLocked, setIsThemeLocked] = useState(isAdminThemeActive())
-  const calledNumbers = useGameStore((state) => state.calledNumbers)
-  const replaceFromBackendState = useGameStore((state) => state.replaceFromBackendState)
+  const {
+    gameId: storeGameId,
+    tickets: liveTickets,
+    replaceFromBackendState,
+    setTicketsFromBackend,
+  } = useGameStore((state) => state)
 
   const handleThemeToggle = () => {
     if (isThemeLocked) return
@@ -92,8 +96,9 @@ const Lobby = () => {
         setGames([latestGame])
         setSelectedGame(game)
 
-        const gameTickets = await fetchLatestGameTickets(playerPhone)
+        const gameTickets = await fetchGameTickets(game.id, playerPhone)
         if (!mounted) return
+        setTicketsFromBackend(game.id, gameTickets)
         setTickets(gameTickets)
       } catch {
         if (!mounted) return
@@ -109,7 +114,7 @@ const Lobby = () => {
     return () => {
       mounted = false
     }
-  }, [searchParams])
+  }, [playerPhone, searchParams, setTicketsFromBackend])
 
   useEffect(() => {
     if (!selectedGame?.id) return
@@ -126,7 +131,8 @@ const Lobby = () => {
         )
       }
       try {
-        const latestTickets = await fetchLatestGameTickets(playerPhone)
+        const latestTickets = await fetchGameTickets(selectedGame.id, playerPhone)
+        setTicketsFromBackend(selectedGame.id, latestTickets)
         setTickets(latestTickets)
       } catch {
         // Keep existing tickets on refresh failure.
@@ -135,7 +141,7 @@ const Lobby = () => {
     return () => {
       unsubscribe()
     }
-  }, [playerPhone, selectedGame?.id])
+  }, [playerPhone, selectedGame?.id, setTicketsFromBackend])
 
   useEffect(() => {
     let mounted = true
@@ -144,7 +150,7 @@ const Lobby = () => {
       try {
         const state = await fetchGameState(selectedGame.id)
         if (!mounted) return
-        // Seed called numbers so ticket marking is correct on refresh.
+        // Seed backend game state for number-board consistency on refresh.
         replaceFromBackendState(state)
       } catch {
         return
@@ -161,8 +167,9 @@ const Lobby = () => {
     const loadTickets = async () => {
       if (!selectedGame?.id) return
       try {
-        const gameTickets = await fetchLatestGameTickets(playerPhone)
+        const gameTickets = await fetchGameTickets(selectedGame.id, playerPhone)
         if (!mounted) return
+        setTicketsFromBackend(selectedGame.id, gameTickets)
         setTickets(gameTickets)
       } catch {
         if (!mounted) return
@@ -173,7 +180,12 @@ const Lobby = () => {
     return () => {
       mounted = false
     }
-  }, [selectedGame?.id])
+  }, [playerPhone, selectedGame?.id, setTicketsFromBackend])
+
+  useEffect(() => {
+    if (!selectedGame?.id || storeGameId !== selectedGame.id) return
+    setTickets(liveTickets as PlayerTicket[])
+  }, [liveTickets, selectedGame?.id, storeGameId])
 
   const countdown = useMemo(() => {
     if (!selectedGame) {
@@ -208,6 +220,7 @@ const Lobby = () => {
 
   return (
     <main className="lobby-shell">
+      <AnnouncementBanner gameId={selectedGame?.id} />
       <section className="lobby-panel">
         <div className="lobby-actions">
           <a className="action-link" href={import.meta.env.VITE_WHATSAPP_URL ?? '#'} target="_blank" rel="noreferrer">
@@ -302,7 +315,7 @@ const Lobby = () => {
             <TambolaTicketCard
               key={ticket.ticket_number}
               ticket={ticket}
-              calledNumbers={calledNumbers}
+              variant="player"
             />
           ))}
       </section>

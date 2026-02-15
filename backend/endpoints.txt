@@ -49,6 +49,8 @@ POST /api/claims/admin/evaluate/
 POST /api/games/admin/<game_id>/start/
 POST /api/games/admin/<game_id>/pause/
 POST /api/games/admin/<game_id>/resume/
+GET /api/games/<game_id>/tickets/
+POST /api/games/<game_id>/announce/
 POST /api/games/admin/<GAME_ID>/start/
 {
   "calling_interval": 1

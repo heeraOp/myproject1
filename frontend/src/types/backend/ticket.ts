@@ -11,4 +11,6 @@ export type PlayerTicket = {
   status: TicketStatus
   ticket_data: TicketData
   player_name: string | null
+  marked_numbers: number[]
+  final_immutable: boolean
 }

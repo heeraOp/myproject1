@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { fetchPublicGames } from '@/api/rest/games'
 import {
+  type AdminGameListItem,
+  announceGame,
   bookTicket,
   createGamePrizes,
   deleteGamePrize,
   getGameBusinessSummary,
   getPrizeTypes,
-  getGameState,
-  getGameSummary,
   getPrizes,
+  loadGameState,
   getTickets,
   getWinners,
+  listAdminGames,
   pauseGame,
   resetAgent,
   resetCall,
@@ -34,7 +35,6 @@ import { useGameStore } from '@/app/store/game.store'
 import { useVoiceModeStore, type VoiceMode } from '@/app/store/voiceMode.store'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
 import { socketManager } from '@/api/websocket/socketManager'
-import type { PublicGame } from '@/types/backend/game'
 import { jsPDF } from 'jspdf'
 import {
   formatThemeLabel,
@@ -43,6 +43,7 @@ import {
   subscribeThemeChange,
   toggleAdminTheme,
 } from '@/utils/theme'
+import { formatDateTimeInIST, toDateTimeLocalInputInIST } from '@/utils/dateTime'
 import './AdminDashboard.css'
 
 type SettingsForm = {
@@ -149,20 +150,11 @@ const getErrorMessage = (error: unknown): string => {
 }
 
 const toDateTimeLocalValue = (value: string | null | undefined): string => {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const pad = (v: number) => String(v).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours(),
-  )}:${pad(date.getMinutes())}`
+  return toDateTimeLocalInputInIST(value)
 }
 
 const formatDateTime = (value?: string): string => {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '-'
-  return date.toLocaleString()
+  return formatDateTimeInIST(value)
 }
 
 const NumberBoard = ({ calledNumbers }: { calledNumbers: number[] }) => {
@@ -188,7 +180,7 @@ const AdminDashboard = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams] = useSearchParams()
-  const [games, setGames] = useState<PublicGame[]>([])
+  const [games, setGames] = useState<AdminGameListItem[]>([])
   const [gameId, setGameId] = useState<string>('')
   const [summary, setSummary] = useState<GameSummaryResponse | null>(null)
   const [business, setBusiness] = useState<GameBusinessSummaryResponse | null>(null)
@@ -207,6 +199,8 @@ const AdminDashboard = () => {
   const [savingSettings, setSavingSettings] = useState(false)
   const [savingPrizes, setSavingPrizes] = useState(false)
   const [bookingTicket, setBookingTicket] = useState(false)
+  const [sendingAnnouncement, setSendingAnnouncement] = useState(false)
+  const [announcementText, setAnnouncementText] = useState('')
   const [showTicketCards, setShowTicketCards] = useState(false)
   const [theme, setTheme] = useState(getActiveTheme())
 
@@ -253,11 +247,14 @@ const AdminDashboard = () => {
   const businessSectionRef = useRef<HTMLElement | null>(null)
 
   const {
+    gameId: storeGameId,
     status: liveStatus,
     calledNumbers: liveCalledNumbers,
+    tickets: liveTickets,
     winners: liveWinners,
     lockedPrizeTypes,
     replaceFromBackendState,
+    setTicketsFromBackend,
     reset: resetLiveState,
   } = useGameStore((state) => state)
   const isSetupMode = searchParams.get('setup') === '1'
@@ -328,75 +325,78 @@ const AdminDashboard = () => {
     }
   }, [])
 
-  const refreshSummaryAndState = useCallback(async (selectedGameId: string) => {
-    const [summaryData, stateData] = await Promise.all([
-      getGameSummary(selectedGameId),
-      getGameState(selectedGameId),
-    ])
-    setSummary(summaryData)
-    replaceFromBackendState(stateData)
-    setCallingInterval(summaryData.game.calling_interval || 10)
-    return summaryData
-  }, [replaceFromBackendState])
+  const rehydrateGameState = useCallback(
+    async (selectedGameId: string) => {
+      const hydrated = await loadGameState(selectedGameId)
+      const summaryData = hydrated.summary
+      const stateData = hydrated.state
+      const businessData = hydrated.business
+      const prizesData = hydrated.prizes
+      const ticketsData = hydrated.ticketsSnapshot.tickets
+      const winnersData = hydrated.winners
+
+      setSummary(summaryData)
+      replaceFromBackendState(stateData)
+      setCallingInterval(summaryData.game.calling_interval || 10)
+      setBusiness(businessData)
+      setPrizes(Array.isArray(prizesData) ? prizesData : [])
+      setTicketsFromBackend(selectedGameId, Array.isArray(ticketsData) ? ticketsData : [])
+      setTickets(Array.isArray(ticketsData) ? ticketsData : [])
+      setWinners(Array.isArray(winnersData) ? winnersData : [])
+
+      const selectedGame = games.find((item) => item.id === selectedGameId)
+      setSettingsForm({
+        gameDateTime: toDateTimeLocalValue(selectedGame?.date),
+        totalTicketLimit: String(summaryData.game.total_tickets ?? businessData.total_tickets),
+        ticketPrice: String(summaryData.game.ticket_price ?? selectedGame?.ticket_price ?? ''),
+        agentCommission: String(summaryData.game.agent_commission ?? businessData.agent_commission ?? 0),
+        bookingStatus: summaryData.game.booking_status === 'CLOSED' ? 'CLOSED' : 'OPEN',
+        websiteStatus: summaryData.game.website_status === 'CLOSED' ? 'CLOSED' : 'OPEN',
+      })
+
+      return summaryData
+    },
+    [games, replaceFromBackendState, setTicketsFromBackend],
+  )
 
   const loadAll = useCallback(
     async (selectedGameId: string) => {
       setLoading(true)
       setError('')
       try {
-        const [summaryData, businessData, prizesData, ticketsData, winnersData] = await Promise.all([
-          refreshSummaryAndState(selectedGameId),
-          getGameBusinessSummary(selectedGameId),
-          getPrizes(selectedGameId),
-          getTickets(selectedGameId),
-          getWinners(selectedGameId),
-        ])
-
-        setBusiness(businessData)
-        setPrizes(Array.isArray(prizesData) ? prizesData : [])
-        setTickets(ticketsData)
-        setWinners(winnersData)
-
-        const selectedGame = games.find((item) => item.id === selectedGameId)
-        setSettingsForm({
-          gameDateTime: toDateTimeLocalValue(selectedGame?.date),
-          totalTicketLimit: String(summaryData.game.total_tickets ?? businessData.total_tickets),
-          ticketPrice: String(summaryData.game.ticket_price ?? selectedGame?.ticket_price ?? ''),
-          agentCommission: String(summaryData.game.agent_commission ?? businessData.agent_commission ?? 0),
-          bookingStatus: summaryData.game.booking_status === 'CLOSED' ? 'CLOSED' : 'OPEN',
-          websiteStatus: summaryData.game.website_status === 'CLOSED' ? 'CLOSED' : 'OPEN',
-        })
+        await rehydrateGameState(selectedGameId)
       } catch (loadError) {
         setError(getErrorMessage(loadError))
       } finally {
         setLoading(false)
       }
     },
-    [games, refreshSummaryAndState],
+    [rehydrateGameState],
   )
 
-  // Primary bootstrap: choose current game from query param or first public game.
+  // Primary bootstrap: choose current game from query param or first admin-visible game.
   useEffect(() => {
     let mounted = true
     const loadGames = async () => {
       try {
         setPublicGamesError('')
-        const publicGames = await fetchPublicGames()
+        const adminGames = await listAdminGames()
         if (!mounted) return
-        setGames(publicGames)
+        setGames(adminGames)
+        const queryGameId = searchParams.get('gameId') || ''
         if (isSetupMode) {
-          setGameId('')
+          setGameId(queryGameId)
           return
         }
-        if (!publicGames.length) return
-        const queryGameId = searchParams.get('gameId')
-        const chosenGame = queryGameId
-          ? publicGames.find((item) => item.id === queryGameId) || publicGames[0]
-          : publicGames[0]
-        setGameId(chosenGame.id)
+        if (queryGameId) {
+          const chosenGame = adminGames.find((item) => item.id === queryGameId)
+          setGameId(chosenGame ? chosenGame.id : queryGameId)
+          return
+        }
+        setGameId(adminGames[0]?.id ?? '')
       } catch (loadGamesError) {
         if (!mounted) return
-        setPublicGamesError(`Unable to load public games: ${getErrorMessage(loadGamesError)}`)
+        setPublicGamesError(`Unable to load games: ${getErrorMessage(loadGamesError)}`)
       }
     }
     void loadGames()
@@ -411,6 +411,11 @@ const AdminDashboard = () => {
   }, [gameId, loadAll])
 
   useEffect(() => {
+    if (!gameId || storeGameId !== gameId) return
+    setTickets(liveTickets as TicketResponse[])
+  }, [gameId, liveTickets, storeGameId])
+
+  useEffect(() => {
     setEditablePrizes(buildPrizeSetupRows(prizeTypes, prizes))
   }, [prizeTypes, prizes])
 
@@ -420,6 +425,7 @@ const AdminDashboard = () => {
     const unsubscribe = socketManager.subscribe('ticket.booked', async () => {
       try {
         const freshTickets = await getTickets(gameId)
+        setTicketsFromBackend(gameId, freshTickets)
         setTickets(freshTickets)
       } catch {
         // Ignore refresh failures; next manual action will refresh.
@@ -428,7 +434,7 @@ const AdminDashboard = () => {
     return () => {
       unsubscribe()
     }
-  }, [gameId])
+  }, [gameId, setTicketsFromBackend])
 
   const mergedWinners = useMemo(() => {
     const seen = new Set<string>()
@@ -516,7 +522,7 @@ const AdminDashboard = () => {
         const booked = bookedMap.get(ticket.ticket_number)
         if (!booked) return ticket
         changed = true
-        return { ...ticket, ...booked, status: 'BOOKED' }
+        return { ...ticket, ...booked, status: 'BOOKED' as const }
       })
       bookedTickets.forEach((ticket) => {
         if (!prev.some((item) => item.ticket_number === ticket.ticket_number)) {
@@ -542,7 +548,7 @@ const AdminDashboard = () => {
       })
 
       // New game creation flow: switch context to the newly created game.
-      const latestGames = await fetchPublicGames()
+      const latestGames = await listAdminGames()
       setGames(latestGames)
       resetLiveState()
 
@@ -610,6 +616,31 @@ const AdminDashboard = () => {
       setActionMessage(getErrorMessage(saveError))
     } finally {
       setSavingPrizes(false)
+    }
+  }
+
+  const handleSendAnnouncement = async () => {
+    if (!gameId) {
+      setActionMessage('Select a game before sending an announcement.')
+      return
+    }
+
+    const message = announcementText.trim()
+    if (!message) {
+      setActionMessage('Announcement message cannot be empty.')
+      return
+    }
+
+    setSendingAnnouncement(true)
+    setActionMessage('')
+    try {
+      await announceGame(gameId, message)
+      setAnnouncementText('')
+      setActionMessage('Announcement sent to connected players.')
+    } catch (sendError) {
+      setActionMessage(getErrorMessage(sendError))
+    } finally {
+      setSendingAnnouncement(false)
     }
   }
 
@@ -684,7 +715,7 @@ const AdminDashboard = () => {
       } else if (summary.game.status === 'PAUSED') {
         await resumeGame(gameId)
       }
-      const latestSummary = await refreshSummaryAndState(gameId)
+      const latestSummary = await rehydrateGameState(gameId)
       setSummary(latestSummary)
       setActionMessage('Game control updated.')
     } catch (actionError) {
@@ -739,6 +770,7 @@ const AdminDashboard = () => {
           getTickets(gameId),
           getGameBusinessSummary(gameId),
         ])
+        setTicketsFromBackend(gameId, freshTickets)
         setTickets(freshTickets)
         latestBusiness = freshBusiness
       } catch {
@@ -840,7 +872,9 @@ const AdminDashboard = () => {
       unsafeWhileRunning: true,
       handler: async () => {
         if (!gameId) return
-        setTickets(await getTickets(gameId))
+        const refreshedTickets = await getTickets(gameId)
+        setTicketsFromBackend(gameId, refreshedTickets)
+        setTickets(refreshedTickets)
       },
     },
     {
@@ -863,7 +897,9 @@ const AdminDashboard = () => {
         if (!gameId) return
         // Keep legacy table view for history list.
         setShowTicketCards(false)
-        setTickets(await getTickets(gameId))
+        const refreshedTickets = await getTickets(gameId)
+        setTicketsFromBackend(gameId, refreshedTickets)
+        setTickets(refreshedTickets)
         ticketSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
       },
     },
@@ -964,6 +1000,30 @@ const AdminDashboard = () => {
           <div>{summary?.game.booking_status ?? '-'}</div>
           <div>Website status</div>
           <div>{summary?.game.website_status ?? '-'}</div>
+        </div>
+      </section>
+
+      <section className="admin-card">
+        <h2>Player Announcement</h2>
+        <p className="announcement-help">
+          Send a live written message to all connected players. This does not pause or alter gameplay.
+        </p>
+        <div className="announcement-form">
+          <textarea
+            value={announcementText}
+            onChange={(event) => setAnnouncementText(event.target.value)}
+            placeholder="Example: Game will resume in 2 minutes."
+            rows={3}
+            maxLength={1000}
+          />
+          <button
+            type="button"
+            className="primary-btn"
+            onClick={handleSendAnnouncement}
+            disabled={!gameId || sendingAnnouncement || !announcementText.trim()}
+          >
+            {sendingAnnouncement ? 'Sending...' : 'Send Announcement'}
+          </button>
         </div>
       </section>
 
@@ -1390,7 +1450,6 @@ const AdminDashboard = () => {
                 <TambolaTicketCard
                   key={ticket.ticket_number}
                   ticket={ticket}
-                  calledNumbers={calledNumbers}
                 />
               ))}
             </div>

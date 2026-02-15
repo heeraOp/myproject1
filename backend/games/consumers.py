@@ -66,3 +66,16 @@ class GameConsumer(AsyncWebsocketConsumer):
                 }
             )
         )
+
+    async def announcement_broadcast(self, event):
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "announcement",
+                    "message": event.get("message"),
+                    "timestamp": event.get("timestamp"),
+                    "game_id": event.get("game_id"),
+                    "announcement_id": event.get("announcement_id"),
+                }
+            )
+        )

@@ -49,25 +49,39 @@ type BackendGameStatePayload = {
   }>
 }
 
+type StoreTicket = {
+  ticket_number: number
+  ticket_data: {
+    rows: Array<Array<number | null>>
+  }
+  marked_numbers?: number[]
+  final_immutable?: boolean
+} & Record<string, unknown>
+
 type GameStateStore = {
+  gameId: string | null
   status: GameStatus
   callingInterval: number | null
   currentNumber: number | null
   calledNumbers: number[]
+  tickets: StoreTicket[]
   winners: Winner[]
   lockedPrizeTypes: string[]
   isInteractionFrozen: boolean
   canSubmitClaims: boolean
   applyBackendEvent: (event: BackendGameEvent) => void
   replaceFromBackendState: (payload: BackendGameStatePayload) => void
+  setTicketsFromBackend: (gameId: string, tickets: StoreTicket[]) => void
   reset: () => void
 }
 
 const initialState = {
+  gameId: null as string | null,
   status: 'IDLE' as GameStatus,
   callingInterval: null as number | null,
   currentNumber: null as number | null,
   calledNumbers: [] as number[],
+  tickets: [] as StoreTicket[],
   winners: [] as Winner[],
   lockedPrizeTypes: [] as string[],
   isInteractionFrozen: false as boolean,
@@ -98,6 +112,29 @@ const toLockedPrizeTypes = (wonPrizes: Array<{ prize_type: string }>): string[] 
   })
   return Array.from(set)
 }
+
+const numbersInTicket = (ticket: StoreTicket): number[] => {
+  const rows = ticket.ticket_data?.rows
+  if (!Array.isArray(rows)) return []
+
+  const values: number[] = []
+  rows.forEach((row) => {
+    if (!Array.isArray(row)) return
+    row.forEach((cell) => {
+      if (typeof cell === 'number' && Number.isInteger(cell)) {
+        values.push(cell)
+      }
+    })
+  })
+
+  return values
+}
+
+const withMarkedNumbers = (ticket: StoreTicket, calledSet: Set<number>, isFinal: boolean): StoreTicket => ({
+  ...ticket,
+  marked_numbers: numbersInTicket(ticket).filter((value) => calledSet.has(value)),
+  final_immutable: isFinal || Boolean(ticket.final_immutable),
+})
 
 export const useGameStore = create<GameStateStore>((set) => ({
   ...initialState,
@@ -130,20 +167,30 @@ export const useGameStore = create<GameStateStore>((set) => ({
         const currentNumberFromList = nextCalledNumbers.length
           ? nextCalledNumbers[nextCalledNumbers.length - 1]
           : event.number
+        const calledSet = new Set(nextCalledNumbers)
+        const nextTickets = state.tickets.map((ticket) =>
+          withMarkedNumbers(ticket, calledSet, false),
+        )
 
         return {
           ...state,
           currentNumber: currentNumberFromList,
           calledNumbers: nextCalledNumbers,
+          tickets: nextTickets,
         }
       }
 
       if (event.type === 'game.finished') {
+        const calledSet = new Set(state.calledNumbers)
+        const frozenTickets = state.tickets.map((ticket) => withMarkedNumbers(ticket, calledSet, true))
         return {
           ...state,
           status: 'FINISHED',
-          currentNumber: null,
-          calledNumbers: [],
+          currentNumber: state.calledNumbers.length
+            ? state.calledNumbers[state.calledNumbers.length - 1]
+            : state.currentNumber,
+          calledNumbers: state.calledNumbers,
+          tickets: frozenTickets,
           isInteractionFrozen: true,
           canSubmitClaims: false,
         }
@@ -169,11 +216,12 @@ export const useGameStore = create<GameStateStore>((set) => ({
       return state
     }),
   replaceFromBackendState: (payload) =>
-    set(() => {
+    set((state) => {
       const rawCalledNumbers = isValidCalledNumbers(payload?.called_numbers) ? payload.called_numbers : []
       const wonPrizes = Array.isArray(payload?.won_prizes) ? payload.won_prizes : []
       const mappedStatus = mapBackendStatus(payload?.game?.status ?? '')
-      const calledNumbers = mappedStatus === 'FINISHED' ? [] : rawCalledNumbers
+      const calledNumbers = rawCalledNumbers
+      const calledSet = new Set(calledNumbers)
       const winnersFromState: Winner[] = wonPrizes.map((winner, index) => ({
         id: index + 1,
         prize_type: winner.prize_type,
@@ -181,17 +229,35 @@ export const useGameStore = create<GameStateStore>((set) => ({
         player_name: winner.player_name ?? null,
       }))
       const lockedPrizeTypes = toLockedPrizeTypes(wonPrizes)
+      const nextTickets =
+        state.gameId && payload?.game?.id && state.gameId === payload.game.id
+          ? state.tickets.map((ticket) =>
+              withMarkedNumbers(ticket, calledSet, mappedStatus === 'FINISHED'),
+            )
+          : state.tickets
 
       return {
+        gameId: payload?.game?.id ?? state.gameId,
         status: mappedStatus,
         callingInterval:
           typeof payload?.game?.calling_interval === 'number' ? payload.game.calling_interval : null,
         currentNumber: calledNumbers.length ? calledNumbers[calledNumbers.length - 1] : null,
         calledNumbers,
+        tickets: nextTickets,
         winners: winnersFromState,
         lockedPrizeTypes,
         isInteractionFrozen: mappedStatus === 'FINISHED',
         canSubmitClaims: mappedStatus !== 'FINISHED',
+      }
+    }),
+  setTicketsFromBackend: (gameId, tickets) =>
+    set((state) => {
+      const calledSet = state.gameId === gameId ? new Set(state.calledNumbers) : new Set<number>()
+      const isFinal = state.gameId === gameId && state.status === 'FINISHED'
+      return {
+        ...state,
+        gameId,
+        tickets: tickets.map((ticket) => withMarkedNumbers(ticket, calledSet, isFinal)),
       }
     }),
   reset: () => set(initialState),

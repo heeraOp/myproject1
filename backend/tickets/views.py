@@ -58,6 +58,18 @@ def _pick_best_open_ticket_numbers(open_numbers, booking_mode, required_count):
     return open_numbers[:required_count]
 
 
+def _ticket_read_context(game, viewer_phone=None):
+    called_numbers = list(game.called_numbers.values_list("number", flat=True))
+    context = {
+        "called_numbers": called_numbers,
+        "called_numbers_set": set(called_numbers),
+        "final_immutable": game.status == Game.Status.FINISHED,
+    }
+    if viewer_phone is not None:
+        context["viewer_phone"] = viewer_phone
+    return context
+
+
 class IsAdminRole(BasePermission):
     """
     Admin-only permission based on user role or staff/superuser flags.
@@ -110,6 +122,9 @@ class AdminTicketBookingView(APIView):
             ).first()
             if game is None:
                 return Response({"detail": "No booking-open game found."}, status=404)
+
+        if game.status == Game.Status.FINISHED:
+            return Response({"detail": "Cannot modify tickets after game is FINISHED."}, status=400)
 
         if game.booking_status != Game.BookingStatus.OPEN:
             return Response({"detail": "Ticket booking is closed for this game."}, status=400)
@@ -274,7 +289,11 @@ class PlayerTicketListView(APIView):
             tickets = tickets.filter(status=status_value)
 
         tickets = tickets.order_by("ticket_number")
-        serializer = PlayerTicketSerializer(tickets, many=True)
+        serializer = PlayerTicketSerializer(
+            tickets,
+            many=True,
+            context=_ticket_read_context(game),
+        )
         return Response(serializer.data)
 
 
@@ -293,7 +312,7 @@ class PublicTicketListView(APIView):
         serializer = PublicTicketSerializer(
             tickets,
             many=True,
-            context={"viewer_phone": viewer_phone},
+            context=_ticket_read_context(game, viewer_phone=viewer_phone),
         )
         return Response(serializer.data)
 
@@ -312,7 +331,7 @@ class PublicLatestTicketListView(APIView):
         serializer = PublicTicketSerializer(
             tickets,
             many=True,
-            context={"viewer_phone": viewer_phone},
+            context=_ticket_read_context(game, viewer_phone=viewer_phone),
         )
         return Response(serializer.data)
 
@@ -326,5 +345,5 @@ class PlayerTicketDetailView(APIView):
         except Ticket.DoesNotExist:
             return Response({"detail": "Ticket not found."}, status=404)
 
-        serializer = PlayerTicketSerializer(ticket)
+        serializer = PlayerTicketSerializer(ticket, context=_ticket_read_context(ticket.game))
         return Response(serializer.data)

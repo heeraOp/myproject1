@@ -1,0 +1,41 @@
+.announcement-banner {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  width: min(92vw, 640px);
+  background: linear-gradient(180deg, rgba(246, 48, 48, 0.96) 0%, rgba(174, 17, 17, 0.96) 100%);
+  color: #fff;
+  border: 2px solid #ffe58e;
+  border-radius: 12px;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28);
+  padding: 12px 14px;
+  pointer-events: none;
+  animation: announcement-slide-down 260ms ease-out;
+}
+
+.announcement-banner__title {
+  display: block;
+  font-size: 0.9rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.announcement-banner__message {
+  margin: 6px 0 0;
+  font-size: 1rem;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+@keyframes announcement-slide-down {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -12px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}

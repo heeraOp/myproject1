@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
+import AnnouncementBanner from '@/components/common/AnnouncementBanner'
 import { fetchLatestPublicGame } from '@/api/rest/games'
-import { fetchLatestGameTickets } from '@/api/rest/tickets'
+import { fetchGameTickets } from '@/api/rest/tickets'
 import {
   fetchGameState,
   fetchGameSummary,
@@ -27,6 +28,7 @@ import {
   subscribeThemeChange,
   toggleTheme,
 } from '@/utils/theme'
+import { formatDateTimeInIST } from '@/utils/dateTime'
 import './LiveGame.css'
 
 const PRIZE_LABEL_MAP: Record<string, string> = {
@@ -79,13 +81,15 @@ const LiveGame = () => {
   }
 
   const {
+    gameId: storeGameId,
     status: liveStatus,
     currentNumber,
     calledNumbers,
+    tickets: liveTickets,
     winners: liveWinners,
     lockedPrizeTypes,
     replaceFromBackendState,
-    reset: resetLiveState,
+    setTicketsFromBackend,
   } = useGameStore((state) => state)
   const {
     announcement: bingoAnnouncement,
@@ -144,21 +148,22 @@ const LiveGame = () => {
         fetchGameSummary(gameId),
         fetchGameState(gameId),
         fetchPrizes(gameId),
-        fetchLatestGameTickets(playerPhone),
+        fetchGameTickets(gameId, playerPhone),
         fetchWinners(gameId),
       ])
 
       setSummary(summaryData)
       setPrizes(prizesData)
+      replaceFromBackendState(stateData)
+      setTicketsFromBackend(gameId, ticketsData)
       setTickets(ticketsData)
       setHistoryWinners(dedupeWinners(winnersData))
-      replaceFromBackendState(stateData)
     } catch {
       setError('Unable to load live game state.')
     } finally {
       setLoading(false)
     }
-  }, [replaceFromBackendState])
+  }, [playerPhone, replaceFromBackendState, setTicketsFromBackend])
 
   useEffect(() => {
     if (!selectedGameId) return
@@ -180,7 +185,8 @@ const LiveGame = () => {
         )
       }
       try {
-        const latestTickets = await fetchLatestGameTickets(playerPhone)
+        const latestTickets = await fetchGameTickets(selectedGameId, playerPhone)
+        setTicketsFromBackend(selectedGameId, latestTickets)
         setTickets(latestTickets)
       } catch {
         // Keep existing tickets on refresh failure.
@@ -189,7 +195,12 @@ const LiveGame = () => {
     return () => {
       unsubscribe()
     }
-  }, [playerPhone, selectedGameId])
+  }, [playerPhone, selectedGameId, setTicketsFromBackend])
+
+  useEffect(() => {
+    if (!selectedGameId || storeGameId !== selectedGameId) return
+    setTickets(liveTickets as PlayerTicket[])
+  }, [liveTickets, selectedGameId, storeGameId])
 
   useEffect(() => {
     const latestWinner = liveWinners[liveWinners.length - 1]
@@ -210,12 +221,6 @@ const LiveGame = () => {
     const timer = window.setTimeout(() => setWinnerOverlay(null), 3500)
     return () => window.clearTimeout(timer)
   }, [liveWinners])
-
-  useEffect(() => {
-    return () => {
-      resetLiveState()
-    }
-  }, [resetLiveState])
 
   const selectedGame = useMemo(
     () => games.find((game) => game.id === selectedGameId) ?? null,
@@ -268,6 +273,7 @@ const LiveGame = () => {
 
   return (
     <main className="live-shell">
+      <AnnouncementBanner gameId={selectedGameId || undefined} />
       <section className="live-header-card">
         <div className="live-header-top">
           <h1>Live Tambola</h1>
@@ -302,7 +308,7 @@ const LiveGame = () => {
             {!games.length && <option value="">No game</option>}
             {games.map((game) => (
               <option key={game.id} value={game.id}>
-                {new Date(game.date).toLocaleString()} ({game.status})
+                {formatDateTimeInIST(game.date)} ({game.status})
               </option>
             ))}
           </select>
@@ -425,13 +431,13 @@ const LiveGame = () => {
               <div className="live-empty">No tickets available.</div>
             ) : (
               <div className="live-ticket-list">
-                {tickets.map((ticket) => (
-                  <TambolaTicketCard
-                    key={ticket.ticket_number}
-                    ticket={ticket}
-                    calledNumbers={calledNumbers}
-                  />
-                ))}
+              {tickets.map((ticket) => (
+                <TambolaTicketCard
+                  key={ticket.ticket_number}
+                  ticket={ticket}
+                  variant="player"
+                />
+              ))}
               </div>
             )}
           </section>

@@ -1,6 +1,33 @@
 from rest_framework import serializers
 
 
+def _ticket_numbers_in_order(ticket_data):
+    rows = ticket_data.get("rows") if isinstance(ticket_data, dict) else []
+    if not isinstance(rows, list):
+        return []
+
+    numbers = []
+    for row in rows:
+        if not isinstance(row, list):
+            continue
+        for value in row:
+            if isinstance(value, int):
+                numbers.append(value)
+    return numbers
+
+
+def _called_numbers_set(context):
+    numbers = context.get("called_numbers")
+    if isinstance(numbers, list):
+        return {value for value in numbers if isinstance(value, int)}
+
+    numbers_set = context.get("called_numbers_set")
+    if isinstance(numbers_set, set):
+        return {value for value in numbers_set if isinstance(value, int)}
+
+    return set()
+
+
 class AdminTicketBookingSerializer(serializers.Serializer):
     # Allow missing game_id for legacy/admin clients; view will resolve active game.
     game_id = serializers.UUIDField(required=False, allow_null=True)
@@ -57,6 +84,20 @@ class PlayerTicketSerializer(serializers.Serializer):
     player_name = serializers.CharField(read_only=True)
     # Include assigned contact for admin ticket views.
     player_phone = serializers.CharField(read_only=True)
+    marked_numbers = serializers.SerializerMethodField()
+    final_immutable = serializers.SerializerMethodField()
+
+    def get_marked_numbers(self, obj):
+        called_set = _called_numbers_set(self.context)
+        if not called_set:
+            return []
+
+        return [value for value in _ticket_numbers_in_order(obj.ticket_data) if value in called_set]
+
+    def get_final_immutable(self, obj):
+        if "final_immutable" in self.context:
+            return bool(self.context.get("final_immutable"))
+        return getattr(obj.game, "status", "") == "FINISHED"
 
 
 class PublicTicketSerializer(serializers.Serializer):
@@ -65,6 +106,20 @@ class PublicTicketSerializer(serializers.Serializer):
     status = serializers.CharField(read_only=True)
     ticket_data = serializers.JSONField(read_only=True)
     player_name = serializers.SerializerMethodField()
+    marked_numbers = serializers.SerializerMethodField()
+    final_immutable = serializers.SerializerMethodField()
+
+    def get_marked_numbers(self, obj):
+        called_set = _called_numbers_set(self.context)
+        if not called_set:
+            return []
+
+        return [value for value in _ticket_numbers_in_order(obj.ticket_data) if value in called_set]
+
+    def get_final_immutable(self, obj):
+        if "final_immutable" in self.context:
+            return bool(self.context.get("final_immutable"))
+        return getattr(obj.game, "status", "") == "FINISHED"
 
     def get_player_name(self, obj):
         """
