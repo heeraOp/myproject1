@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -131,6 +132,10 @@ TIME_ZONE = 'Asia/Kolkata'
 USE_I18N = True
 
 USE_TZ = True
+
+# Public support fallback (used when a game has no assigned agent).
+SUPPORT_WHATSAPP_NAME = os.environ.get("SUPPORT_WHATSAPP_NAME", "Support")
+SUPPORT_WHATSAPP_NUMBER = os.environ.get("SUPPORT_WHATSAPP_NUMBER", "")
 
 
 # Static files (CSS, JavaScript, Images)

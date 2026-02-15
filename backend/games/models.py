@@ -1,7 +1,26 @@
 import uuid
 
 from django.conf import settings
+from django.core.validators import RegexValidator
 from django.db import models
+
+
+whatsapp_number_validator = RegexValidator(
+    regex=r"^\+?[1-9]\d{7,14}$",
+    message="Enter a valid WhatsApp number with country code (example: +919876543210).",
+)
+
+
+class Agent(models.Model):
+    name = models.CharField(max_length=100)
+    whatsapp_number = models.CharField(max_length=20, validators=[whatsapp_number_validator])
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("name", "id")
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.whatsapp_number})"
 
 
 class Game(models.Model):
@@ -37,6 +56,7 @@ class Game(models.Model):
     active_theme = models.CharField(max_length=20, choices=Theme.choices, default=Theme.DARK)
     is_active = models.BooleanField(default=False)
     calling_interval = models.PositiveIntegerField(default=10)
+    agent = models.ForeignKey(Agent, null=True, blank=True, on_delete=models.SET_NULL, related_name="games")
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
 

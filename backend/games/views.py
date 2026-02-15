@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.utils import timezone
@@ -11,7 +12,7 @@ from channels.layers import get_channel_layer
 from django.db import transaction
 from rest_framework.views import APIView
 
-from .models import Game, Announcement
+from .models import Agent, Game, Announcement
 from .serializers import AnnouncementCreateSerializer
 from .utils.calling import call_next_number
 from .tasks import auto_call_numbers
@@ -109,6 +110,16 @@ def _ticket_snapshot_context(game, viewer_phone=None):
     return context
 
 
+def _agent_payload(agent):
+    if agent is None:
+        return None
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "whatsapp_number": agent.whatsapp_number,
+    }
+
+
 def _admin_game_payload(game):
     return {
         "id": str(game.id),
@@ -119,6 +130,7 @@ def _admin_game_payload(game):
         "total_tickets": game.total_ticket_limit,
         "ticket_price": game.ticket_price,
         "agent_commission": game.agent_commission,
+        "agent": _agent_payload(game.agent),
         "active_theme": game.active_theme,
         "is_active": game.is_active,
     }
@@ -129,6 +141,7 @@ class AdminGameCreateSerializer(serializers.Serializer):
     ticket_price = serializers.IntegerField(min_value=1)
     total_tickets = serializers.IntegerField(min_value=1)
     agent_commission = serializers.IntegerField(min_value=0, required=False, default=0)
+    agent_id = serializers.IntegerField(required=False, allow_null=True)
     booking_status = serializers.ChoiceField(
         choices=Game.BookingStatus.choices,
         required=False,
@@ -150,6 +163,14 @@ class AdminGameCreateSerializer(serializers.Serializer):
         if timezone.is_naive(value):
             return timezone.make_aware(value, default_tz)
         return timezone.localtime(value, default_tz)
+
+    def validate_agent_id(self, value):
+        if value in (None, ""):
+            return None
+        agent = Agent.objects.filter(id=value, is_active=True).first()
+        if agent is None:
+            raise serializers.ValidationError("Agent not found or inactive.")
+        return agent
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -491,6 +512,7 @@ class AdminGameListCreateView(APIView):
         ticket_price = validated["ticket_price"]
         total_tickets = validated["total_tickets"]
         agent_commission = validated["agent_commission"]
+        agent = validated.get("agent_id")
         booking_status = validated["booking_status"]
         website_status = validated["website_status"]
         active_theme = validated["active_theme"]
@@ -505,6 +527,7 @@ class AdminGameListCreateView(APIView):
                 game_datetime=game_datetime,
                 ticket_price=ticket_price,
                 agent_commission=agent_commission,
+                agent=agent,
                 total_ticket_limit=total_tickets,
                 active_theme=active_theme,
                 is_active=True,
@@ -546,6 +569,35 @@ class CurrentAdminGameView(APIView):
         return Response(_admin_game_payload(game))
 
 
+@method_decorator(csrf_exempt, name="dispatch")
+class AdminAgentListView(APIView):
+    """
+    Admin-only endpoint to list active agents for game assignment.
+    """
+
+    permission_classes = [IsAdminRole]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def get(self, request):
+        agents = Agent.objects.filter(is_active=True).order_by("name", "id")
+        return Response(
+            [
+                {
+                    "id": agent.id,
+                    "name": agent.name,
+                    "whatsapp_number": agent.whatsapp_number,
+                }
+                for agent in agents
+            ]
+        )
+
+
+class AgentPublicSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    whatsapp_number = serializers.CharField(read_only=True)
+
+
 class PublicGameSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
     date = serializers.DateTimeField(source="game_datetime", read_only=True)
@@ -553,6 +605,7 @@ class PublicGameSerializer(serializers.Serializer):
     ticket_price = serializers.IntegerField(read_only=True)
     booking_status = serializers.CharField(read_only=True)
     website_status = serializers.CharField(read_only=True)
+    agent = AgentPublicSerializer(read_only=True, allow_null=True)
     active_theme = serializers.CharField(read_only=True)
     is_active = serializers.BooleanField(read_only=True)
 
@@ -592,6 +645,20 @@ class CurrentPublicGameView(APIView):
         return Response(serializer.data)
 
 
+class PublicSupportSettingsView(APIView):
+    authentication_classes = []
+
+    def get(self, request):
+        return Response(
+            {
+                "support": {
+                    "name": getattr(settings, "SUPPORT_WHATSAPP_NAME", "Support"),
+                    "whatsapp_number": getattr(settings, "SUPPORT_WHATSAPP_NUMBER", ""),
+                }
+            }
+        )
+
+
 class GameStateView(APIView):
     authentication_classes = []
 
@@ -626,6 +693,7 @@ class GameStateView(APIView):
                     "calling_interval": game.calling_interval,
                     "booking_status": game.booking_status,
                     "website_status": game.website_status,
+                    "agent": _agent_payload(game.agent),
                 },
                 "called_numbers": called_numbers,
                 "won_prizes": won_prizes,
@@ -724,6 +792,7 @@ class GameSummaryView(APIView):
             "calling_interval": game.calling_interval,
             "booking_status": game.booking_status,
             "website_status": game.website_status,
+            "agent": _agent_payload(game.agent),
             "active_theme": game.active_theme,
             "total_tickets": game.total_ticket_limit,
             "ticket_price": game.ticket_price,
