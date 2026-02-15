@@ -91,6 +91,7 @@ const LiveGame = () => {
     replaceFromBackendState,
     setTicketsFromBackend,
     clearWinnerQueue,
+    setActiveTheme,
   } = useGameStore((state) => state)
   const {
     announcement: bingoAnnouncement,
@@ -125,6 +126,7 @@ const LiveGame = () => {
         if (currentGame.active_theme) {
           setAdminTheme(currentGame.active_theme)
         }
+        setActiveTheme(currentGame.active_theme ?? null)
         // Public side should only ever see the backend-active game.
         setGames([currentGame])
         setSelectedGameId(currentGame.id)
@@ -138,7 +140,7 @@ const LiveGame = () => {
     return () => {
       mounted = false
     }
-  }, [searchParams])
+  }, [searchParams, setActiveTheme])
 
   const loadGameData = useCallback(async (gameId: string) => {
     setLoading(true)
@@ -172,31 +174,98 @@ const LiveGame = () => {
   }, [clearWinnerQueue, loadGameData, selectedGameId])
 
   useEffect(() => {
-    if (!selectedGameId) return
-    // Listen for ticket booking updates and refresh public tickets safely.
-    const unsubscribe = socketManager.subscribe('ticket.booked', async (event: unknown) => {
-      // Update local tickets immediately so UI doesn't stay stale if refresh fails.
-      const payload = event as { ticket_numbers?: number[] }
-      if (Array.isArray(payload?.ticket_numbers) && payload.ticket_numbers.length > 0) {
-        const bookedSet = new Set(payload.ticket_numbers)
+    const unsubNewGame = socketManager.subscribe('new_game_created', async (event: unknown) => {
+      const payload = (event as { data?: PublicGame }).data
+      const nextGameId = typeof payload?.id === 'string' ? payload.id : ''
+      if (!nextGameId) return
+
+      const nextGame: PublicGame = {
+        id: nextGameId,
+        date: String(payload?.date ?? new Date().toISOString()),
+        status: (payload?.status ?? 'CREATED') as PublicGame['status'],
+        ticket_price: Number(payload?.ticket_price ?? 0),
+        booking_status: (payload?.booking_status ?? 'OPEN') as PublicGame['booking_status'],
+        website_status: (payload?.website_status ?? 'OPEN') as PublicGame['website_status'],
+        agent: payload?.agent ?? null,
+        active_theme: payload?.active_theme,
+        is_active: true,
+      }
+
+      if (nextGame.active_theme) {
+        setAdminTheme(nextGame.active_theme)
+      }
+      setActiveTheme(nextGame.active_theme ?? null)
+      setGames([nextGame])
+      setSelectedGameId(nextGameId)
+      setTickets([])
+      setHistoryWinners([])
+      setTicketsFromBackend(nextGameId, [])
+      clearWinnerQueue()
+
+      try {
+        await loadGameData(nextGameId)
+      } catch {
+        return
+      }
+    })
+
+    const unsubTicketsGenerated = socketManager.subscribe('tickets_generated', async (event: unknown) => {
+      const payload = (event as { data?: { game_id?: string } }).data
+      const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
+      if (!eventGameId || !selectedGameId || eventGameId !== selectedGameId) return
+
+      try {
+        const latestTickets = await fetchGameTickets(eventGameId, playerPhone)
+        setTicketsFromBackend(eventGameId, latestTickets)
+        setTickets(latestTickets)
+      } catch {
+        return
+      }
+    })
+
+    const unsubTicketBooked = socketManager.subscribe('ticket_booked', async (event: unknown) => {
+      const payload = (
+        event as {
+          data?: {
+            game_id?: string
+            ticket_id?: string
+            status?: string
+          }
+        }
+      ).data
+
+      const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
+      if (!eventGameId || !selectedGameId || eventGameId !== selectedGameId) return
+
+      const ticketId = typeof payload?.ticket_id === 'string' ? payload.ticket_id : ''
+      if (ticketId) {
         setTickets((prev) =>
           prev.map((ticket) =>
-            bookedSet.has(ticket.ticket_number) ? { ...ticket, status: 'BOOKED' } : ticket,
+            ticket.id === ticketId
+              ? {
+                  ...ticket,
+                  status: typeof payload?.status === 'string' ? payload.status : ticket.status,
+                }
+              : ticket,
           ),
         )
       }
+
       try {
-        const latestTickets = await fetchGameTickets(selectedGameId, playerPhone)
-        setTicketsFromBackend(selectedGameId, latestTickets)
+        const latestTickets = await fetchGameTickets(eventGameId, playerPhone)
+        setTicketsFromBackend(eventGameId, latestTickets)
         setTickets(latestTickets)
       } catch {
-        // Keep existing tickets on refresh failure.
+        return
       }
     })
+
     return () => {
-      unsubscribe()
+      unsubNewGame()
+      unsubTicketsGenerated()
+      unsubTicketBooked()
     }
-  }, [playerPhone, selectedGameId, setTicketsFromBackend])
+  }, [clearWinnerQueue, loadGameData, playerPhone, selectedGameId, setActiveTheme, setTicketsFromBackend])
 
   useEffect(() => {
     if (!selectedGameId || storeGameId !== selectedGameId) return

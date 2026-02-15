@@ -7,10 +7,16 @@ class GameConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.game_id = str(self.scope["url_route"]["kwargs"]["game_id"])
         self.group_name = f"game_{self.game_id}"
+        self.global_group_name = "global_lobby"
+        print("Consumer CONNECTED")
+        print("Joining group:", self.global_group_name)
+        print("Joining group:", self.group_name)
+        await self.channel_layer.group_add(self.global_group_name, self.channel_name)
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
 
     async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(self.global_group_name, self.channel_name)
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
     async def number_called(self, event):
@@ -45,6 +51,22 @@ class GameConsumer(AsyncWebsocketConsumer):
             )
         )
 
+    async def winner_broadcast(self, event):
+        print("Consumer received winner event:", event)
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "winner",
+                    "winner_id": event["winner_id"],
+                    "ticket_id": event["ticket_id"],
+                    "prize_id": event["prize_id"],
+                    "prize_name": event["prize_name"],
+                    "winner_name": event["winner_name"],
+                    "timestamp": event["timestamp"],
+                }
+            )
+        )
+
     async def game_finished(self, event):
         await self.send(
             text_data=json.dumps(
@@ -55,14 +77,37 @@ class GameConsumer(AsyncWebsocketConsumer):
         )
 
     async def ticket_booked(self, event):
-        """
-        Ticket booking updates (no personal data). Clients can refetch tickets safely.
-        """
+        print("Consumer received ticket_booked event:", event)
+        payload = event.get("data", {})
         await self.send(
             text_data=json.dumps(
                 {
-                    "type": "ticket.booked",
-                    "ticket_numbers": event.get("ticket_numbers", []),
+                    "type": "ticket_booked",
+                    "data": payload,
+                }
+            )
+        )
+
+    async def tickets_generated(self, event):
+        print("Consumer received tickets_generated event:", event)
+        payload = event.get("data", {})
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "tickets_generated",
+                    "data": payload,
+                }
+            )
+        )
+
+    async def new_game_created(self, event):
+        print("Consumer received new_game_created event:", event)
+        payload = event.get("data", {})
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "new_game_created",
+                    "data": payload,
                 }
             )
         )

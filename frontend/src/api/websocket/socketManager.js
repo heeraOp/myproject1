@@ -121,6 +121,7 @@ class SocketManager {
     }
 
     this.socket.onmessage = (event) => {
+      console.log('RAW SOCKET MESSAGE:', event.data)
       let payload
       try {
         payload = JSON.parse(event.data)

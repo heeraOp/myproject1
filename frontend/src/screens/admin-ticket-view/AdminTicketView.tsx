@@ -10,6 +10,7 @@ import {
 import { socketManager } from '@/api/websocket/socketManager'
 import { useGameSocket } from '@/app/hooks/useGameSocket'
 import { useGameStore } from '@/app/store/game.store'
+import { normalizeTicketStatus } from '@/types/backend/ticket'
 import '@/screens/admin-dashboard/AdminDashboard.css'
 
 const AdminTicketView = () => {
@@ -92,8 +93,18 @@ const AdminTicketView = () => {
   }, [gameId, liveTickets, storeGameId])
 
   useEffect(() => {
-    if (!gameId) return
-    const unsubscribe = socketManager.subscribe('ticket.booked', async () => {
+    const unsubNewGame = socketManager.subscribe('new_game_created', (event: unknown) => {
+      const payload = (event as { data?: { id?: string } }).data
+      const nextGameId = typeof payload?.id === 'string' ? payload.id : ''
+      if (!nextGameId) return
+      navigate(`/admin/tickets?gameId=${nextGameId}`, { replace: true })
+    })
+
+    const unsubTicketsGenerated = socketManager.subscribe('tickets_generated', async (event: unknown) => {
+      if (!gameId) return
+      const payload = (event as { data?: { game_id?: string } }).data
+      const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
+      if (!eventGameId || eventGameId !== gameId) return
       try {
         const latestTickets = await getTickets(gameId)
         setTicketsFromBackend(gameId, latestTickets)
@@ -102,13 +113,33 @@ const AdminTicketView = () => {
         return
       }
     })
+
+    const unsubTicketBooked = socketManager.subscribe('ticket_booked', async (event: unknown) => {
+      if (!gameId) return
+      const payload = (event as { data?: { game_id?: string } }).data
+      const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
+      if (!eventGameId || eventGameId !== gameId) return
+      try {
+        const latestTickets = await getTickets(gameId)
+        setTicketsFromBackend(gameId, latestTickets)
+        setTickets(latestTickets)
+      } catch {
+        return
+      }
+    })
+
     return () => {
-      unsubscribe()
+      unsubNewGame()
+      unsubTicketsGenerated()
+      unsubTicketBooked()
     }
-  }, [gameId, setTicketsFromBackend])
+  }, [gameId, navigate, setTicketsFromBackend])
 
   const visibleTickets = useMemo(
-    () => (showAll ? tickets : tickets.filter((ticket) => ticket.status === 'BOOKED')),
+    () =>
+      showAll
+        ? tickets
+        : tickets.filter((ticket) => normalizeTicketStatus(ticket.status) === 'CONFIRMED'),
     [showAll, tickets],
   )
 

@@ -1,0 +1,104 @@
+body.theme-default {
+  --theme-bg: linear-gradient(160deg, #0f172a 0%, #1e293b 100%);
+  --theme-overlay:
+    radial-gradient(circle at 10% 10%, rgba(56, 189, 248, 0.12) 0%, transparent 40%),
+    radial-gradient(circle at 90% 90%, rgba(99, 102, 241, 0.18) 0%, transparent 38%);
+  --theme-text: #eef2ff;
+}
+
+body.theme-diwali {
+  --theme-bg: linear-gradient(150deg, #2c0f00 0%, #5f1901 48%, #2a0f00 100%);
+  --theme-overlay:
+    radial-gradient(circle at 20% 15%, rgba(255, 221, 107, 0.26) 0%, transparent 42%),
+    radial-gradient(circle at 78% 22%, rgba(255, 137, 41, 0.26) 0%, transparent 45%),
+    radial-gradient(circle at 50% 78%, rgba(255, 193, 77, 0.16) 0%, transparent 40%);
+  --theme-text: #fff4d6;
+}
+
+body.theme-holi {
+  --theme-bg: linear-gradient(150deg, #2a103d 0%, #03213f 45%, #143813 100%);
+  --theme-overlay:
+    radial-gradient(circle at 12% 22%, rgba(255, 110, 178, 0.25) 0%, transparent 40%),
+    radial-gradient(circle at 80% 20%, rgba(120, 240, 255, 0.26) 0%, transparent 40%),
+    radial-gradient(circle at 50% 82%, rgba(255, 204, 102, 0.2) 0%, transparent 38%),
+    radial-gradient(circle at 90% 75%, rgba(128, 255, 146, 0.24) 0%, transparent 36%);
+  --theme-text: #f4f9ff;
+}
+
+body.theme-default,
+body.theme-diwali,
+body.theme-holi {
+  color: var(--theme-text);
+  background-image: var(--theme-overlay), var(--theme-bg);
+  background-attachment: fixed;
+  background-size: cover;
+  transition: background-image 240ms ease, color 180ms ease;
+}
+
+/* Optional wallpaper-like layer that changes per theme class. */
+body.theme-default::before,
+body.theme-diwali::before,
+body.theme-holi::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.5;
+  background-image:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.03) 25%, transparent 25%),
+    linear-gradient(225deg, rgba(255, 255, 255, 0.03) 25%, transparent 25%),
+    linear-gradient(45deg, rgba(255, 255, 255, 0.03) 25%, transparent 25%),
+    linear-gradient(315deg, rgba(255, 255, 255, 0.03) 25%, transparent 25%);
+  background-position:
+    20px 0,
+    20px 0,
+    0 0,
+    0 0;
+  background-size: 40px 40px;
+}
+
+body.theme-diwali::before {
+  opacity: 0.36;
+}
+
+body.theme-holi::before {
+  opacity: 0.42;
+}
+
+.theme-toggle-card {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(7, 12, 40, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(6px);
+}
+
+.theme-toggle-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.theme-toggle-select {
+  min-width: 122px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(15, 23, 42, 0.84);
+  color: #f8fafc;
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.theme-toggle-select:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.75);
+  outline-offset: 1px;
+}

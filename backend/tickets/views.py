@@ -15,6 +15,8 @@ from .models import Ticket
 from .serializers import (
     AdminBulkTicketGenerateSerializer,
     AdminTicketBookingSerializer,
+    TicketBookingStatusSerializer,
+    TicketRequestBookingSerializer,
     PublicTicketSerializer,
     PlayerTicketSerializer,
 )
@@ -93,6 +95,55 @@ class CsrfExemptSessionAuthentication(SessionAuthentication):
         return
 
 
+def _ticket_payload(ticket):
+    return TicketBookingStatusSerializer(ticket).data
+
+
+def _broadcast_ticket_booked(game, ticket):
+    channel_layer = get_channel_layer()
+    group_name = f"game_{str(game.id)}"
+    payload = {
+        "game_id": str(game.id),
+        "ticket_id": str(ticket.id),
+        "ticket_number": ticket.ticket_number,
+        "status": ticket.status,
+        "player_name": ticket.player_name or ticket.requested_by_name or "",
+    }
+    try:
+        print("Ticket booked:", payload)
+        print("Group broadcast:", group_name)
+        async_to_sync(channel_layer.group_send)(
+            group_name,
+            {
+                "type": "ticket_booked",
+                "data": payload,
+            },
+        )
+    except Exception as exc:
+        print("Group broadcast failed (ticket_booked):", str(exc))
+
+
+def _broadcast_tickets_generated(game, total_generated):
+    channel_layer = get_channel_layer()
+    group_name = f"game_{str(game.id)}"
+    payload = {
+        "game_id": str(game.id),
+        "total_generated": int(total_generated),
+    }
+    try:
+        print("Ticket generated:", payload)
+        print("Group broadcast:", group_name)
+        async_to_sync(channel_layer.group_send)(
+            group_name,
+            {
+                "type": "tickets_generated",
+                "data": payload,
+            },
+        )
+    except Exception as exc:
+        print("Group broadcast failed (tickets_generated):", str(exc))
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class AdminTicketBookingView(APIView):
     permission_classes = [IsAdminRole]
@@ -148,7 +199,7 @@ class AdminTicketBookingView(APIView):
         with transaction.atomic():
             open_numbers = list(
                 Ticket.objects.select_for_update()
-                .filter(game=game, status=Ticket.Status.OPEN)
+                .filter(game=game, status=Ticket.Status.AVAILABLE)
                 .order_by("ticket_number")
                 .values_list("ticket_number", flat=True)
             )
@@ -183,29 +234,23 @@ class AdminTicketBookingView(APIView):
                 return Response({"detail": "One or more tickets not found."}, status=404)
 
             for ticket in tickets:
-                if ticket.status != Ticket.Status.OPEN or ticket.player_name or ticket.player_phone:
+                if ticket.status != Ticket.Status.AVAILABLE or ticket.player_name or ticket.player_phone:
                     return Response({"detail": f"Ticket {ticket.ticket_number} is already booked."}, status=400)
 
             now = timezone.now()
             for ticket in tickets:
                 ticket.player_name = player_name
                 ticket.player_phone = player_phone
-                ticket.status = Ticket.Status.BOOKED
+                ticket.status = Ticket.Status.CONFIRMED
                 ticket.booked_at = now
+                ticket.requested_by_name = None
+                ticket.requested_by_whatsapp = None
+                ticket.requested_at = None
                 ticket.ticket_type = booking_ticket_type
                 ticket.save()
 
-            booked_numbers = [ticket.ticket_number for ticket in tickets]
-
-        # Notify listeners using the existing game websocket group (no personal data).
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"game_{str(game.id)}",
-            {
-                "type": "ticket_booked",
-                "ticket_numbers": booked_numbers,
-            },
-        )
+        for ticket in tickets:
+            _broadcast_ticket_booked(game, ticket)
 
         booked_payloads = [
             {
@@ -225,6 +270,116 @@ class AdminTicketBookingView(APIView):
         primary["booked_tickets"] = booked_payloads
         primary["total_booked"] = len(booked_payloads)
         return Response(primary)
+
+
+class TicketRequestBookingView(APIView):
+    authentication_classes = []
+
+    def post(self, request, ticket_id):
+        serializer = TicketRequestBookingSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+
+        with transaction.atomic():
+            try:
+                ticket = (
+                    Ticket.objects.select_for_update()
+                    .select_related("game")
+                    .get(id=ticket_id)
+                )
+            except Ticket.DoesNotExist:
+                return Response({"detail": "Ticket not found."}, status=404)
+
+            game = ticket.game
+            if game.status == Game.Status.FINISHED:
+                return Response({"detail": "Cannot modify tickets after game is FINISHED."}, status=400)
+            if game.booking_status != Game.BookingStatus.OPEN:
+                return Response({"detail": "Ticket booking is closed for this game."}, status=400)
+            if ticket.status != Ticket.Status.AVAILABLE:
+                return Response({"detail": "Ticket is not available for booking request."}, status=400)
+
+            ticket.status = Ticket.Status.PENDING
+            ticket.requested_by_name = serializer.validated_data["player_name"]
+            ticket.requested_by_whatsapp = serializer.validated_data["whatsapp"]
+            ticket.requested_at = timezone.now()
+            ticket.save(
+                update_fields=[
+                    "status",
+                    "requested_by_name",
+                    "requested_by_whatsapp",
+                    "requested_at",
+                ]
+            )
+
+        _broadcast_ticket_booked(game, ticket)
+        return Response(_ticket_payload(ticket))
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AdminConfirmBookingView(APIView):
+    permission_classes = [IsAdminRole]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def post(self, request, ticket_id):
+        with transaction.atomic():
+            try:
+                ticket = (
+                    Ticket.objects.select_for_update()
+                    .select_related("game")
+                    .get(id=ticket_id)
+                )
+            except Ticket.DoesNotExist:
+                return Response({"detail": "Ticket not found."}, status=404)
+
+            if ticket.status != Ticket.Status.PENDING:
+                return Response({"detail": "Only pending tickets can be confirmed."}, status=400)
+
+            ticket.status = Ticket.Status.CONFIRMED
+            ticket.player_name = ticket.requested_by_name
+            ticket.player_phone = ticket.requested_by_whatsapp
+            ticket.booked_at = timezone.now()
+            ticket.save(update_fields=["status", "player_name", "player_phone", "booked_at"])
+
+        _broadcast_ticket_booked(ticket.game, ticket)
+
+        return Response(_ticket_payload(ticket))
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AdminRejectBookingView(APIView):
+    permission_classes = [IsAdminRole]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def post(self, request, ticket_id):
+        with transaction.atomic():
+            try:
+                ticket = Ticket.objects.select_for_update().get(id=ticket_id)
+            except Ticket.DoesNotExist:
+                return Response({"detail": "Ticket not found."}, status=404)
+
+            if ticket.status != Ticket.Status.PENDING:
+                return Response({"detail": "Only pending tickets can be rejected."}, status=400)
+
+            ticket.status = Ticket.Status.AVAILABLE
+            ticket.player_name = None
+            ticket.player_phone = None
+            ticket.booked_at = None
+            ticket.requested_by_name = None
+            ticket.requested_by_whatsapp = None
+            ticket.requested_at = None
+            ticket.save(
+                update_fields=[
+                    "status",
+                    "player_name",
+                    "player_phone",
+                    "booked_at",
+                    "requested_by_name",
+                    "requested_by_whatsapp",
+                    "requested_at",
+                ]
+            )
+
+        return Response(_ticket_payload(ticket))
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -261,11 +416,14 @@ class AdminBulkTicketGenerateView(APIView):
                         ticket_number=ticket_number,
                         ticket_type=Ticket.TicketType.RANDOM,
                         ticket_data=ticket_data,
-                        status=Ticket.Status.OPEN,
+                        status=Ticket.Status.AVAILABLE,
                     )
                 )
 
             Ticket.objects.bulk_create(tickets)
+            generated_count = len(tickets)
+
+        _broadcast_tickets_generated(game, generated_count)
 
         return Response({"total_generated": total_tickets})
 

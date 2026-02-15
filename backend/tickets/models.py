@@ -12,8 +12,9 @@ class Ticket(models.Model):
         FULL_SHEET = "FULL_SHEET", "Full Sheet"
 
     class Status(models.TextChoices):
-        OPEN = "OPEN", "Open"
-        BOOKED = "BOOKED", "Booked"
+        AVAILABLE = "AVAILABLE", "Available"
+        PENDING = "PENDING", "Pending"
+        CONFIRMED = "CONFIRMED", "Confirmed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     game = models.ForeignKey(Game, on_delete=models.CASCADE, related_name="tickets")
@@ -22,7 +23,10 @@ class Ticket(models.Model):
     ticket_data = models.JSONField()
     player_name = models.CharField(max_length=100, null=True, blank=True)
     player_phone = models.CharField(max_length=20, null=True, blank=True)
-    status = models.CharField(max_length=10, choices=Status.choices)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.AVAILABLE)
+    requested_by_name = models.CharField(max_length=120, null=True, blank=True)
+    requested_by_whatsapp = models.CharField(max_length=20, null=True, blank=True)
+    requested_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     booked_at = models.DateTimeField(null=True, blank=True)

@@ -28,8 +28,8 @@ export const getAdminTheme = () => adminTheme
 export const getActiveTheme = (): Theme => {
   if (adminTheme) return adminTheme
   if (typeof document !== 'undefined') {
-    const current = document.documentElement.dataset.theme
-    if (isTheme(current ?? null)) return current
+    const current = document.documentElement.dataset.theme ?? null
+    if (isTheme(current)) return current
   }
   return getStoredTheme() ?? 'dark'
 }

@@ -35,7 +35,7 @@ class RevenueReportView(APIView):
         total_prize_money = 0
 
         for game in games:
-            booked = Ticket.objects.filter(game=game, status=Ticket.Status.BOOKED).count()
+            booked = Ticket.objects.filter(game=game, status=Ticket.Status.CONFIRMED).count()
             total_revenue += booked * game.ticket_price
             prize_total = Prize.objects.filter(game=game).aggregate(total=Sum("amount")).get("total") or 0
             total_prize_money += prize_total

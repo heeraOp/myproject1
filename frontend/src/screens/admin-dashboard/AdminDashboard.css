@@ -190,8 +190,7 @@
 
 .primary-btn,
 .secondary-btn,
-.action-btn,
-.ticket-booker button {
+.action-btn {
   border: none;
   cursor: pointer;
   border-radius: 8px;
@@ -214,8 +213,7 @@
 
 .primary-btn:disabled,
 .secondary-btn:disabled,
-.action-btn:disabled,
-.ticket-booker button:disabled {
+.action-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
@@ -389,28 +387,69 @@
   padding: 10px;
 }
 
-.ticket-booker {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+.pending-requests-panel {
   margin-bottom: 10px;
-}
-
-.ticket-booker input {
   border: 2px solid var(--color-0a0e3d);
-  border-radius: 8px;
+  border-radius: 10px;
+  background: var(--color-0f1e78);
   padding: 10px;
 }
 
-.ticket-booker select {
-  border: 2px solid var(--color-0a0e3d);
-  border-radius: 8px;
-  padding: 10px;
+.pending-requests-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 800;
+  margin-bottom: 8px;
 }
 
-.ticket-booker button {
-  background: linear-gradient(180deg, var(--color-ff1f2d) 0%, var(--color-b10d18) 100%);
+.pending-requests-head span {
+  background: var(--color-ffb400);
+  color: var(--color-111);
+  border-radius: 999px;
+  min-width: 28px;
+  text-align: center;
+  padding: 2px 8px;
+}
+
+.pending-requests-empty {
+  border: 1px dashed var(--color-rgba-255-255-255-02);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--color-d9e0ff);
+  font-weight: 600;
+}
+
+.pending-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.approve-btn,
+.reject-btn {
+  border: none;
+  border-radius: 8px;
   color: var(--color-fff);
+  cursor: pointer;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  padding: 8px 10px;
+}
+
+.approve-btn {
+  background: linear-gradient(180deg, var(--color-20ad63) 0%, var(--color-066b2b) 100%);
+}
+
+.reject-btn {
+  background: linear-gradient(180deg, var(--color-ff1f2d) 0%, var(--color-b10d18) 100%);
+}
+
+.approve-btn:disabled,
+.reject-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .poster-preview {
@@ -450,10 +489,6 @@
   .action-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  .ticket-booker {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 760px) {
@@ -481,8 +516,7 @@
   .kv-grid,
   .form-grid,
   .control-grid,
-  .action-grid,
-  .ticket-booker {
+  .action-grid {
     grid-template-columns: 1fr;
   }
 

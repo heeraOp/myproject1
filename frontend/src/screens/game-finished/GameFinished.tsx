@@ -21,6 +21,7 @@ import {
 } from '@/utils/theme'
 import { formatDateTimeInIST } from '@/utils/dateTime'
 import { useGameSocket } from '@/app/hooks/useGameSocket'
+import { useGameStore } from '@/app/store/game.store'
 import './GameFinished.css'
 
 const PRIZE_LABEL_MAP: Record<string, string> = {
@@ -59,6 +60,7 @@ const GameFinished = () => {
   }, [])
   const [theme, setTheme] = useState(getActiveTheme())
   const [isThemeLocked, setIsThemeLocked] = useState(isAdminThemeActive())
+  const setActiveTheme = useGameStore((state) => state.setActiveTheme)
 
   const handleThemeToggle = () => {
     if (isThemeLocked) return
@@ -79,6 +81,7 @@ const GameFinished = () => {
         if (currentGame.active_theme) {
           setAdminTheme(currentGame.active_theme)
         }
+        setActiveTheme(currentGame.active_theme ?? null)
         // Public side should only ever see the backend-active game.
         setGames([currentGame])
         setSelectedGameId(currentGame.id)
@@ -92,7 +95,7 @@ const GameFinished = () => {
     return () => {
       mounted = false
     }
-  }, [searchParams])
+  }, [searchParams, setActiveTheme])
 
   useEffect(() => {
     let mounted = true

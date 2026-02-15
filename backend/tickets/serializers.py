@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from .models import Ticket
+
 
 def _ticket_numbers_in_order(ticket_data):
     rows = ticket_data.get("rows") if isinstance(ticket_data, dict) else []
@@ -66,6 +68,37 @@ class AdminTicketBookingSerializer(serializers.Serializer):
         return attrs
 
 
+class TicketRequestBookingSerializer(serializers.Serializer):
+    player_name = serializers.CharField(max_length=120)
+    whatsapp = serializers.CharField(max_length=20)
+
+    def validate_player_name(self, value):
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError("player_name is required.")
+        return cleaned
+
+    def validate_whatsapp(self, value):
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError("whatsapp is required.")
+        return cleaned
+
+
+class TicketBookingStatusSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    game_id = serializers.UUIDField(read_only=True)
+    ticket_number = serializers.IntegerField(read_only=True)
+    ticket_type = serializers.CharField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    player_name = serializers.CharField(read_only=True)
+    player_phone = serializers.CharField(read_only=True)
+    booked_at = serializers.DateTimeField(read_only=True)
+    requested_by_name = serializers.CharField(read_only=True)
+    requested_by_whatsapp = serializers.CharField(read_only=True)
+    requested_at = serializers.DateTimeField(read_only=True)
+
+
 class AdminBulkTicketGenerateSerializer(serializers.Serializer):
     game_id = serializers.UUIDField()
     total_tickets = serializers.IntegerField()
@@ -77,6 +110,8 @@ class AdminBulkTicketGenerateSerializer(serializers.Serializer):
 
 
 class PlayerTicketSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    game_id = serializers.UUIDField(read_only=True)
     ticket_number = serializers.IntegerField(read_only=True)
     ticket_type = serializers.CharField(read_only=True)
     status = serializers.CharField(read_only=True)
@@ -84,6 +119,9 @@ class PlayerTicketSerializer(serializers.Serializer):
     player_name = serializers.CharField(read_only=True)
     # Include assigned contact for admin ticket views.
     player_phone = serializers.CharField(read_only=True)
+    requested_by_name = serializers.CharField(read_only=True)
+    requested_by_whatsapp = serializers.CharField(read_only=True)
+    requested_at = serializers.DateTimeField(read_only=True)
     marked_numbers = serializers.SerializerMethodField()
     final_immutable = serializers.SerializerMethodField()
 
@@ -101,11 +139,16 @@ class PlayerTicketSerializer(serializers.Serializer):
 
 
 class PublicTicketSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    game_id = serializers.UUIDField(read_only=True)
     ticket_number = serializers.IntegerField(read_only=True)
     ticket_type = serializers.CharField(read_only=True)
     status = serializers.CharField(read_only=True)
     ticket_data = serializers.JSONField(read_only=True)
     player_name = serializers.SerializerMethodField()
+    requested_by_name = serializers.CharField(read_only=True)
+    requested_by_whatsapp = serializers.CharField(read_only=True)
+    requested_at = serializers.DateTimeField(read_only=True)
     marked_numbers = serializers.SerializerMethodField()
     final_immutable = serializers.SerializerMethodField()
 
@@ -126,8 +169,8 @@ class PublicTicketSerializer(serializers.Serializer):
         Only reveal ownership for the requesting player (by phone).
         Never expose other players' personal data.
         """
-        # Only expose player name for booked tickets to avoid leaking data on OPEN tickets.
-        if getattr(obj, "status", "") != "BOOKED":
+        # Only expose player name for confirmed tickets to avoid leaking data otherwise.
+        if getattr(obj, "status", "") != Ticket.Status.CONFIRMED:
             return None
         viewer_phone = (self.context.get("viewer_phone") or "").strip()
         if viewer_phone and obj.player_phone and obj.player_phone.strip() == viewer_phone:

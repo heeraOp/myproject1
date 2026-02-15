@@ -1,10 +1,10 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import confetti from 'canvas-confetti'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useGameStore } from '@/app/store/game.store'
 import './WinnerCelebrationOverlay.css'
 
-const AUTO_DISMISS_MS = 7000
+const AUTO_DISMISS_MS = 3000
 
 const PRIZE_LABEL_MAP: Record<string, string> = {
   FIRST_HOUSE: 'First Full House',
@@ -62,40 +62,11 @@ const fireWinnerConfetti = () => {
   }, 180)
 }
 
-const playVictorySound = () => {
-  try {
-    const AudioContextCtor =
-      window.AudioContext ||
-      (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (!AudioContextCtor) return
-
-    const ctx = new AudioContextCtor()
-    const oscillator = ctx.createOscillator()
-    const gainNode = ctx.createGain()
-
-    oscillator.type = 'triangle'
-    oscillator.frequency.setValueAtTime(523.25, ctx.currentTime)
-    oscillator.frequency.exponentialRampToValueAtTime(783.99, ctx.currentTime + 0.18)
-
-    gainNode.gain.setValueAtTime(0.0001, ctx.currentTime)
-    gainNode.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.04)
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.24)
-
-    oscillator.connect(gainNode)
-    gainNode.connect(ctx.destination)
-    oscillator.start()
-    oscillator.stop(ctx.currentTime + 0.24)
-    oscillator.onended = () => {
-      void ctx.close()
-    }
-  } catch {
-    return
-  }
-}
-
 const WinnerCelebrationOverlay = () => {
   const activeWinner = useGameStore((state) => state.winnerQueue[0] ?? null)
   const dismissWinnerAnnouncement = useGameStore((state) => state.dismissWinnerAnnouncement)
+  const timeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const prizeLabel = useMemo(
     () => toReadablePrizeName(activeWinner?.prize_name ?? ''),
@@ -103,20 +74,42 @@ const WinnerCelebrationOverlay = () => {
   )
 
   useEffect(() => {
-    if (!activeWinner) return
-    fireWinnerConfetti()
-    playVictorySound()
-  }, [activeWinner?.id, activeWinner])
+    if (!audioRef.current) {
+      audioRef.current = new Audio('/sounds/winner.mp3')
+      audioRef.current.preload = 'auto'
+    }
+  }, [])
 
   useEffect(() => {
     if (!activeWinner) return
-    const timer = window.setTimeout(() => {
+    fireWinnerConfetti()
+
+    if (timeoutRef.current) {
+      window.clearTimeout(timeoutRef.current)
+    }
+    timeoutRef.current = window.setTimeout(() => {
       dismissWinnerAnnouncement()
     }, AUTO_DISMISS_MS)
-    return () => {
-      window.clearTimeout(timer)
+
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      void audioRef.current.play().catch(() => {})
     }
   }, [activeWinner?.id, activeWinner, dismissWinnerAnnouncement])
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        window.clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.currentTime = 0
+      }
+    }
+  }, [])
 
   return (
     <AnimatePresence mode="wait">

@@ -67,6 +67,7 @@ type StoreTicket = {
 
 type GameStateStore = {
   gameId: string | null
+  activeTheme: string | null
   status: GameStatus
   callingInterval: number | null
   currentNumber: number | null
@@ -77,6 +78,7 @@ type GameStateStore = {
   lockedPrizeTypes: string[]
   isInteractionFrozen: boolean
   canSubmitClaims: boolean
+  setActiveTheme: (theme: string | null) => void
   applyBackendEvent: (event: BackendGameEvent) => void
   replaceFromBackendState: (payload: BackendGameStatePayload) => void
   setTicketsFromBackend: (gameId: string, tickets: StoreTicket[]) => void
@@ -88,6 +90,7 @@ type GameStateStore = {
 
 const initialState = {
   gameId: null as string | null,
+  activeTheme: null as string | null,
   status: 'IDLE' as GameStatus,
   callingInterval: null as number | null,
   currentNumber: null as number | null,
@@ -157,6 +160,11 @@ const toWinnerAnnouncement = (winner: Winner): WinnerAnnouncement => ({
 
 export const useGameStore = create<GameStateStore>((set) => ({
   ...initialState,
+  setActiveTheme: (theme) =>
+    set((state) => ({
+      ...state,
+      activeTheme: typeof theme === 'string' && theme.trim() ? theme.trim() : null,
+    })),
   applyBackendEvent: (event) =>
     set((state) => {
       if (event.type === 'game.started') {

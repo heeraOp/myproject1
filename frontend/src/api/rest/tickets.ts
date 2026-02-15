@@ -21,3 +21,33 @@ export const fetchGameTickets = async (
   })
   return Array.isArray(response.data?.tickets) ? response.data.tickets : []
 }
+
+export type RequestBookingPayload = {
+  player_name: string
+  whatsapp: string
+}
+
+export type RequestBookingResponse = {
+  id: string
+  game_id: string
+  ticket_number: number
+  ticket_type: string
+  status: string
+  player_name: string | null
+  player_phone: string | null
+  booked_at: string | null
+  requested_by_name: string | null
+  requested_by_whatsapp: string | null
+  requested_at: string | null
+}
+
+export const requestTicketBooking = async (
+  ticketId: string,
+  payload: RequestBookingPayload,
+): Promise<RequestBookingResponse> => {
+  const response = await apiClient.post<RequestBookingResponse>(
+    `/tickets/${ticketId}/request-booking/`,
+    payload,
+  )
+  return response.data
+}

@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
 import AnnouncementBanner from '@/components/common/AnnouncementBanner'
-import { fetchCurrentPublicGame } from '@/api/rest/games'
+import { fetchCurrentPublicGame, fetchPublicSupportSettings } from '@/api/rest/games'
 import { fetchGameState } from '@/api/rest/gamePublic'
-import { fetchGameTickets } from '@/api/rest/tickets'
+import { fetchGameTickets, requestTicketBooking } from '@/api/rest/tickets'
 import { socketManager } from '@/api/websocket/socketManager'
 import { useGameSocket } from '@/app/hooks/useGameSocket'
 import { useGameStore } from '@/app/store/game.store'
 import type { PublicGame } from '@/types/backend/game'
-import type { PlayerTicket } from '@/types/backend/ticket'
+import { normalizeTicketStatus, type PlayerTicket } from '@/types/backend/ticket'
 import {
   formatThemeLabel,
   getActiveTheme,
@@ -29,6 +29,15 @@ const formatDate = (dateValue: string): string => {
   return formatDateInIST(dateValue)
 }
 
+type SupportContact = {
+  name: string
+  whatsapp_number: string
+}
+
+const normalizeWhatsAppNumber = (value: string): string => value.replace(/\D/g, '')
+
+const hasValidCountryCode = (digits: string): boolean => /^[1-9]\d{10,14}$/.test(digits)
+
 const Lobby = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -39,6 +48,10 @@ const Lobby = () => {
   const [tickets, setTickets] = useState<PlayerTicket[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [supportNotice, setSupportNotice] = useState<string>('')
+  const [bookingNotice, setBookingNotice] = useState<string>('')
+  const [requestingTicketNumber, setRequestingTicketNumber] = useState<number | null>(null)
+  const [fallbackSupport, setFallbackSupport] = useState<SupportContact | null>(null)
   const [now, setNow] = useState(Date.now())
   const [theme, setTheme] = useState(getActiveTheme())
   const [isThemeLocked, setIsThemeLocked] = useState(isAdminThemeActive())
@@ -47,6 +60,7 @@ const Lobby = () => {
     tickets: liveTickets,
     replaceFromBackendState,
     setTicketsFromBackend,
+    setActiveTheme,
   } = useGameStore((state) => state)
 
   const handleThemeToggle = () => {
@@ -64,6 +78,33 @@ const Lobby = () => {
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+    const loadSupportSettings = async () => {
+      try {
+        const response = await fetchPublicSupportSettings()
+        if (!mounted) return
+        const number = String(response?.support?.whatsapp_number ?? '').trim()
+        const name = String(response?.support?.name ?? '').trim() || 'Support'
+        if (!number) {
+          setFallbackSupport(null)
+          return
+        }
+        setFallbackSupport({
+          name,
+          whatsapp_number: number,
+        })
+      } catch {
+        if (!mounted) return
+        setFallbackSupport(null)
+      }
+    }
+    void loadSupportSettings()
+    return () => {
+      mounted = false
+    }
   }, [])
 
   // Keep called numbers synced via the existing game websocket feed.
@@ -90,6 +131,7 @@ const Lobby = () => {
         if (currentGame.active_theme) {
           setAdminTheme(currentGame.active_theme)
         }
+        setActiveTheme(currentGame.active_theme ?? null)
 
         // Public side should only ever see the backend-active game.
         const game = currentGame
@@ -114,34 +156,106 @@ const Lobby = () => {
     return () => {
       mounted = false
     }
-  }, [playerPhone, searchParams, setTicketsFromBackend])
+  }, [playerPhone, searchParams, setActiveTheme, setTicketsFromBackend])
 
   useEffect(() => {
-    if (!selectedGame?.id) return
-    // Listen for booking events to keep ticket status fresh.
-    const unsubscribe = socketManager.subscribe('ticket.booked', async (event: unknown) => {
-      // Update local tickets immediately so UI doesn't stay stale if refresh fails.
-      const payload = event as { ticket_numbers?: number[] }
-      if (Array.isArray(payload?.ticket_numbers) && payload.ticket_numbers.length > 0) {
-        const bookedSet = new Set(payload.ticket_numbers)
+    const unsubNewGame = socketManager.subscribe('new_game_created', async (event: unknown) => {
+      const payload = (event as { data?: PublicGame }).data
+      const nextGameId = typeof payload?.id === 'string' ? payload.id : ''
+      if (!nextGameId) return
+
+      const nextGame: PublicGame = {
+        id: nextGameId,
+        date: String(payload?.date ?? new Date().toISOString()),
+        status: (payload?.status ?? 'CREATED') as PublicGame['status'],
+        ticket_price: Number(payload?.ticket_price ?? 0),
+        booking_status: (payload?.booking_status ?? 'OPEN') as PublicGame['booking_status'],
+        website_status: (payload?.website_status ?? 'OPEN') as PublicGame['website_status'],
+        agent: payload?.agent ?? null,
+        active_theme: payload?.active_theme,
+        is_active: true,
+      }
+
+      if (nextGame.active_theme) {
+        setAdminTheme(nextGame.active_theme)
+      }
+      setActiveTheme(nextGame.active_theme ?? null)
+      setGames([nextGame])
+      setSelectedGame(nextGame)
+      setTickets([])
+      setTicketsFromBackend(nextGameId, [])
+
+      try {
+        const [state, latestTickets] = await Promise.all([
+          fetchGameState(nextGameId),
+          fetchGameTickets(nextGameId, playerPhone),
+        ])
+        replaceFromBackendState(state)
+        setTicketsFromBackend(nextGameId, latestTickets)
+        setTickets(latestTickets)
+      } catch {
+        return
+      }
+    })
+
+    const unsubTicketsGenerated = socketManager.subscribe('tickets_generated', async (event: unknown) => {
+      const payload = (event as { data?: { game_id?: string } }).data
+      const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
+      if (!eventGameId || !selectedGame?.id || eventGameId !== selectedGame.id) return
+
+      try {
+        const latestTickets = await fetchGameTickets(eventGameId, playerPhone)
+        setTicketsFromBackend(eventGameId, latestTickets)
+        setTickets(latestTickets)
+      } catch {
+        return
+      }
+    })
+
+    const unsubTicketBooked = socketManager.subscribe('ticket_booked', async (event: unknown) => {
+      const payload = (
+        event as {
+          data?: {
+            game_id?: string
+            ticket_id?: string
+            status?: string
+            player_name?: string
+          }
+        }
+      ).data
+
+      const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
+      if (!eventGameId || !selectedGame?.id || eventGameId !== selectedGame.id) return
+
+      const ticketId = typeof payload?.ticket_id === 'string' ? payload.ticket_id : ''
+      if (ticketId) {
         setTickets((prev) =>
           prev.map((ticket) =>
-            bookedSet.has(ticket.ticket_number) ? { ...ticket, status: 'BOOKED' } : ticket,
+            ticket.id === ticketId
+              ? {
+                  ...ticket,
+                  status: typeof payload?.status === 'string' ? payload.status : ticket.status,
+                }
+              : ticket,
           ),
         )
       }
+
       try {
-        const latestTickets = await fetchGameTickets(selectedGame.id, playerPhone)
-        setTicketsFromBackend(selectedGame.id, latestTickets)
+        const latestTickets = await fetchGameTickets(eventGameId, playerPhone)
+        setTicketsFromBackend(eventGameId, latestTickets)
         setTickets(latestTickets)
       } catch {
-        // Keep existing tickets on refresh failure.
+        return
       }
     })
+
     return () => {
-      unsubscribe()
+      unsubNewGame()
+      unsubTicketsGenerated()
+      unsubTicketBooked()
     }
-  }, [playerPhone, selectedGame?.id, setTicketsFromBackend])
+  }, [playerPhone, replaceFromBackendState, selectedGame?.id, setActiveTheme, setTicketsFromBackend])
 
   useEffect(() => {
     let mounted = true
@@ -204,7 +318,7 @@ const Lobby = () => {
   }, [now, selectedGame])
 
   const ticketsBooked = useMemo(
-    () => tickets.filter((ticket) => ticket.status === 'BOOKED').length,
+    () => tickets.filter((ticket) => normalizeTicketStatus(ticket.status) === 'CONFIRMED').length,
     [tickets],
   )
 
@@ -212,6 +326,90 @@ const Lobby = () => {
     if (!selectedGame) return 0
     return Math.max(0, tickets.length - ticketsBooked)
   }, [selectedGame, tickets.length, ticketsBooked])
+
+  const supportContact = useMemo<SupportContact | null>(() => {
+    const agent = selectedGame?.agent
+    if (agent?.whatsapp_number) {
+      return {
+        name: agent.name || 'Support',
+        whatsapp_number: agent.whatsapp_number,
+      }
+    }
+    return fallbackSupport
+  }, [fallbackSupport, selectedGame?.agent])
+
+  const supportDigits = useMemo(
+    () => normalizeWhatsAppNumber(supportContact?.whatsapp_number ?? ''),
+    [supportContact?.whatsapp_number],
+  )
+
+  const canContactSupport = hasValidCountryCode(supportDigits)
+
+  useEffect(() => {
+    setSupportNotice('')
+  }, [selectedGame?.id, supportDigits])
+
+  const handleContactSupport = () => {
+    if (!canContactSupport || !supportContact) {
+      setSupportNotice('Support not available')
+      return
+    }
+
+    const supportName = supportContact.name || 'Admin'
+    const message = encodeURIComponent(
+      `Hello ${supportName}, I have a question about Game ${selectedGame?.id ?? 'current'}`,
+    )
+    const url = `https://wa.me/${supportDigits}?text=${message}`
+    window.open(url, '_blank', 'noopener,noreferrer')
+    setSupportNotice('')
+  }
+
+  const handleRequestBooking = async (ticket: PlayerTicket) => {
+    if (!selectedGame?.id) return
+    if (normalizeTicketStatus(ticket.status) !== 'AVAILABLE') return
+
+    const playerNameInput = window.prompt('Enter your name')
+    if (playerNameInput === null) return
+    const playerName = playerNameInput.trim()
+    const whatsappInput = window.prompt('Enter your WhatsApp number', playerPhone ?? '')
+    if (whatsappInput === null) return
+    const whatsapp = whatsappInput.trim()
+    if (!playerName || !whatsapp) {
+      setBookingNotice('Enter player name and WhatsApp to request booking.')
+      return
+    }
+
+    if (!ticket.id) {
+      setBookingNotice('Unable to request this ticket right now. Please refresh and try again.')
+      return
+    }
+
+    setRequestingTicketNumber(ticket.ticket_number)
+    setBookingNotice('')
+    try {
+      await requestTicketBooking(ticket.id, {
+        player_name: playerName,
+        whatsapp,
+      })
+
+      const latestTickets = await fetchGameTickets(selectedGame.id, playerPhone)
+      setTicketsFromBackend(selectedGame.id, latestTickets)
+      setTickets(latestTickets)
+      setBookingNotice(`Booking request sent for ticket ${ticket.ticket_number}.`)
+    } catch (error: unknown) {
+      const detail =
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: { data?: { detail?: unknown } } }).response?.data?.detail ===
+          'string'
+          ? String((error as { response?: { data?: { detail?: string } } }).response?.data?.detail)
+          : 'Unable to request booking right now.'
+      setBookingNotice(detail)
+    } finally {
+      setRequestingTicketNumber(null)
+    }
+  }
 
   const enterLiveGame = () => {
     if (!selectedGame?.id) return
@@ -223,9 +421,14 @@ const Lobby = () => {
       <AnnouncementBanner gameId={selectedGame?.id} />
       <section className="lobby-panel">
         <div className="lobby-actions">
-          <a className="action-link" href={import.meta.env.VITE_WHATSAPP_URL ?? '#'} target="_blank" rel="noreferrer">
-            Whatsapp
-          </a>
+          <button
+            className="action-link"
+            type="button"
+            onClick={handleContactSupport}
+            disabled={!canContactSupport}
+          >
+            Contact Support (WhatsApp)
+          </button>
           <button className="action-link" type="button">
             Agent list
           </button>
@@ -239,6 +442,9 @@ const Lobby = () => {
             Theme: {formatThemeLabel(theme)}
           </button>
         </div>
+        {supportContact?.name && <div className="support-meta">Support: {supportContact.name}</div>}
+        {supportNotice && <div className="support-meta support-meta--warn">{supportNotice}</div>}
+        {bookingNotice && <div className="booking-notice">{bookingNotice}</div>}
 
         <div className="lobby-game-picker">
           <label htmlFor="lobby-game">Active game</label>
@@ -316,6 +522,8 @@ const Lobby = () => {
               key={ticket.ticket_number}
               ticket={ticket}
               variant="player"
+              onRequestBooking={handleRequestBooking}
+              requestingTicketNumber={requestingTicketNumber}
             />
           ))}
       </section>

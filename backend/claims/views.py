@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.utils import timezone
 
 from games.models import Game
 from tickets.models import Ticket
@@ -69,11 +70,15 @@ class GameWinnersView(APIView):
         except Game.DoesNotExist:
             return Response({"detail": "Game not found."}, status=404)
 
+        print("SUMMARY CALLED")
+        print("Summary game id:", game.id)
         winners = (
             Winner.objects.filter(game=game)
             .select_related("prize", "ticket")
             .order_by("created_at", "id")
         )
+        print("Winners count in summary:", winners.count())
+        print("Winner IDs returned:", list(winners.values_list("id", flat=True)))
 
         return Response(WinnerSerializer(winners, many=True).data)
 
@@ -443,5 +448,18 @@ class ClaimSubmitView(APIView):
                 "winner": winner_payload,
             },
         )
+        async_to_sync(channel_layer.group_send)(
+            f"game_{game.id}",
+            {
+                "type": "winner_broadcast",
+                "winner_id": str(winner.id),
+                "ticket_id": str(winner.ticket.id),
+                "prize_id": str(winner.prize.id),
+                "prize_name": getattr(winner.prize, "name", winner.prize.prize_type),
+                "winner_name": winner.username or winner.ticket.player_name or "",
+                "timestamp": timezone.now().isoformat(),
+            },
+        )
+        print("Winner broadcast sent")
 
         return Response({"winner": winner_payload})

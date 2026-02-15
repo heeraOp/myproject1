@@ -30,6 +30,37 @@
   color: var(--color-ffe700);
 }
 
+.ticket-status.pending {
+  color: var(--color-ffb347);
+}
+
+.ticket-request-btn {
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--color-20ad63) 0%, var(--color-066b2b) 100%);
+  color: var(--color-fff);
+  font-weight: 800;
+  font-size: 14px;
+  padding: 8px 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.ticket-request-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ticket-pending-meta {
+  background: var(--color-0f1e78);
+  border-left: 3px solid var(--color-ffb347);
+  border-right: 3px solid var(--color-ffb347);
+  color: var(--color-f4f6ff);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 10px;
+}
+
 .ticket-grid-wrapper {
   display: grid;
   grid-template-columns: 1fr 44px;

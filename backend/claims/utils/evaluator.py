@@ -1,6 +1,7 @@
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.db import transaction
+from django.utils import timezone
 
 from tickets.models import Ticket
 
@@ -56,7 +57,7 @@ def check_prize_condition(prize_type, game):
     prize_key = _normalize_prize_type(prize_type)
 
     called_numbers = set(game.called_numbers.values_list("number", flat=True))
-    tickets = list(game.tickets.filter(status=Ticket.Status.BOOKED).order_by("ticket_number"))
+    tickets = list(game.tickets.filter(status=Ticket.Status.CONFIRMED).order_by("ticket_number"))
 
     mapping = {
         "FIRST_HOUSE": validators.validate_full_house,
@@ -122,19 +123,46 @@ def evaluate_claims_for_game(game):
             if not created:
                 continue
 
+            print("===== WINNER PIPELINE START =====")
+            print("Game ID at validation:", game.id)
+            print("Prize ID:", prize.id)
+            print("Winner saved:", winner.id)
+            print("Winner game:", winner.game.id)
+
             prize.is_claimed = True
             prize.save(update_fields=["is_claimed"])
-            Claim.objects.create(game=game, prize=prize, ticket=winning_ticket)
+            claim = Claim.objects.create(game=game, prize=prize, ticket=winning_ticket)
+            print("Claim ID:", claim.id)
 
             winner_payload = WinnerSerializer(winner).data
 
-            async_to_sync(channel_layer.group_send)(
-                f"game_{str(game.id)}",
-                {
-                    "type": "winner_announced",
-                    "winner": winner_payload,
-                },
-            )
+            try:
+                channel_layer = get_channel_layer()
+                group_name = f"game_{game.id}"
+                print("Broadcast group:", group_name)
+                async_to_sync(channel_layer.group_send)(
+                    f"game_{str(game.id)}",
+                    {
+                        "type": "winner_announced",
+                        "winner": winner_payload,
+                    },
+                )
+                async_to_sync(channel_layer.group_send)(
+                    group_name,
+                    {
+                        "type": "winner_broadcast",
+                        "winner_id": str(winner.id),
+                        "ticket_id": str(winner.ticket.id),
+                        "prize_id": str(winner.prize.id),
+                        "prize_name": getattr(winner.prize, "name", winner.prize.prize_type),
+                        "winner_name": winner.username or winner.ticket.player_name or "",
+                        "timestamp": timezone.now().isoformat(),
+                    },
+                )
+                print("Winner broadcast SUCCESS")
+            except Exception as e:
+                print("Winner broadcast FAILED:", str(e))
+            print("===== WINNER PIPELINE END =====")
 
             if (
                 _normalize_prize_type(prize.prize_type) in ("FULL_HOUSE", "FULL_SHEET")

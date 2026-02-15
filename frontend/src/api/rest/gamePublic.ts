@@ -77,7 +77,9 @@ export type PublicPrize = {
 }
 
 export const fetchGameSummary = async (gameId: string): Promise<PublicGameSummary> => {
+  console.log('Fetching summary for gameId:', gameId)
   const response = await apiClient.get<PublicGameSummary>(`/games/${gameId}/summary/`)
+  console.log('Summary response:', response.data)
   return response.data
 }
 

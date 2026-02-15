@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
+  type AgentOption,
   type AdminGameListItem,
   announceGame,
-  bookTicket,
+  confirmTicketRequest,
   createGamePrizes,
+  fetchAgents,
   getCurrentAdminGame,
   deleteGamePrize,
   getGameBusinessSummary,
@@ -18,6 +20,7 @@ import {
   resetAgent,
   resetCall,
   resetTicket,
+  rejectTicketRequest,
   resumeGame,
   saveGameSettings,
   startGame,
@@ -37,6 +40,7 @@ import { useVoiceModeStore, type VoiceMode } from '@/app/store/voiceMode.store'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
 import { socketManager } from '@/api/websocket/socketManager'
 import { jsPDF } from 'jspdf'
+import { normalizeTicketStatus } from '@/types/backend/ticket'
 import {
   formatThemeLabel,
   getActiveTheme,
@@ -52,15 +56,9 @@ type SettingsForm = {
   totalTicketLimit: string
   ticketPrice: string
   agentCommission: string
+  agentId: string
   bookingStatus: 'OPEN' | 'CLOSED'
   websiteStatus: 'OPEN' | 'CLOSED'
-}
-
-type BookingForm = {
-  ticketNumber: string
-  bookingMode: 'RANDOM' | 'HALF_SHEET' | 'FULL_SHEET'
-  playerName: string
-  playerPhone: string
 }
 
 type PrizeSetupRow = {
@@ -191,6 +189,7 @@ const AdminDashboard = () => {
   const [editablePrizes, setEditablePrizes] = useState<PrizeSetupRow[]>([])
   const [tickets, setTickets] = useState<TicketResponse[]>([])
   const [winners, setWinners] = useState<WinnerResponse[]>([])
+  const [agents, setAgents] = useState<AgentOption[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>('')
   const [publicGamesError, setPublicGamesError] = useState<string>('')
@@ -199,7 +198,8 @@ const AdminDashboard = () => {
   const [callingInterval, setCallingInterval] = useState<number>(10)
   const [savingSettings, setSavingSettings] = useState(false)
   const [savingPrizes, setSavingPrizes] = useState(false)
-  const [bookingTicket, setBookingTicket] = useState(false)
+  const [pendingActionTicketId, setPendingActionTicketId] = useState<string | null>(null)
+  const [pendingActionType, setPendingActionType] = useState<'approve' | 'reject' | null>(null)
   const [sendingAnnouncement, setSendingAnnouncement] = useState(false)
   const [announcementText, setAnnouncementText] = useState('')
   const [showTicketCards, setShowTicketCards] = useState(false)
@@ -210,16 +210,10 @@ const AdminDashboard = () => {
     totalTicketLimit: '',
     ticketPrice: '',
     agentCommission: '',
+    agentId: '',
     bookingStatus: 'OPEN',
     websiteStatus: 'OPEN',
   })
-  const [bookingForm, setBookingForm] = useState<BookingForm>({
-    ticketNumber: '',
-    bookingMode: 'RANDOM',
-    playerName: '',
-    playerPhone: '',
-  })
-
   const handleThemeToggle = async () => {
     if (!gameId) {
       setActionMessage('Select a game to update the theme.')
@@ -285,7 +279,7 @@ const AdminDashboard = () => {
   const viewTitleMap: Record<typeof activeView, string> = {
     main: 'Main Dashboard',
     run: 'Run Control',
-    book: 'Ticket Booking',
+    book: 'Ticket Approval',
     list: 'History & Reports',
     poster: 'Poster & Dividend',
     prizes: 'Configure Prizes',
@@ -301,6 +295,24 @@ const AdminDashboard = () => {
 
   // Real-time stream for called numbers and winner announcements.
   useGameSocket(gameId || undefined)
+
+  useEffect(() => {
+    let mounted = true
+    const loadAgents = async () => {
+      try {
+        const fetchedAgents = await fetchAgents()
+        if (!mounted) return
+        setAgents(Array.isArray(fetchedAgents) ? fetchedAgents : [])
+      } catch {
+        if (!mounted) return
+        setAgents([])
+      }
+    }
+    void loadAgents()
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -338,7 +350,13 @@ const AdminDashboard = () => {
 
       setSummary(summaryData)
       replaceFromBackendState(stateData)
-      setCallingInterval(summaryData.game.calling_interval || 10)
+      setCallingInterval(
+        typeof summaryData.game.calling_interval === 'number'
+          ? summaryData.game.calling_interval
+          : typeof stateData.game.calling_interval === 'number'
+            ? stateData.game.calling_interval
+            : 10,
+      )
       setBusiness(businessData)
       setPrizes(Array.isArray(prizesData) ? prizesData : [])
       setTicketsFromBackend(selectedGameId, Array.isArray(ticketsData) ? ticketsData : [])
@@ -351,6 +369,7 @@ const AdminDashboard = () => {
         totalTicketLimit: String(summaryData.game.total_tickets ?? businessData.total_tickets),
         ticketPrice: String(summaryData.game.ticket_price ?? selectedGame?.ticket_price ?? ''),
         agentCommission: String(summaryData.game.agent_commission ?? businessData.agent_commission ?? 0),
+        agentId: String(summaryData.game.agent?.id ?? selectedGame?.agent?.id ?? ''),
         bookingStatus: summaryData.game.booking_status === 'CLOSED' ? 'CLOSED' : 'OPEN',
         websiteStatus: summaryData.game.website_status === 'CLOSED' ? 'CLOSED' : 'OPEN',
       })
@@ -425,19 +444,95 @@ const AdminDashboard = () => {
   }, [prizeTypes, prizes])
 
   useEffect(() => {
-    if (!gameId) return
-    // Sync ticket list when bookings happen from another session/device.
-    const unsubscribe = socketManager.subscribe('ticket.booked', async () => {
+    const unsubNewGame = socketManager.subscribe('new_game_created', async (event: unknown) => {
+      const payload = (event as { data?: AdminGameListItem }).data
+      const nextGameId = typeof payload?.id === 'string' ? payload.id : ''
+      if (!nextGameId) return
+
+      if (typeof payload.calling_interval === 'number') {
+        setCallingInterval(payload.calling_interval)
+      }
+
+      setSummary(null)
+      setBusiness(null)
+      setPrizes([])
+      setEditablePrizes([])
+      setTickets([])
+      setWinners([])
+      setGameId(nextGameId)
+
       try {
-        const freshTickets = await getTickets(gameId)
-        setTicketsFromBackend(gameId, freshTickets)
-        setTickets(freshTickets)
+        const refreshedGames = await listAdminGames()
+        setGames(refreshedGames)
       } catch {
-        // Ignore refresh failures; next manual action will refresh.
+        return
       }
     })
+
+    const unsubTicketsGenerated = socketManager.subscribe('tickets_generated', async (event: unknown) => {
+      const payload = (event as { data?: { game_id?: string } }).data
+      const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
+      if (!eventGameId || !gameId || eventGameId !== gameId) return
+
+      try {
+        const freshTickets = await getTickets(eventGameId)
+        setTicketsFromBackend(eventGameId, freshTickets)
+        setTickets(freshTickets)
+      } catch {
+        return
+      }
+    })
+
+    const unsubTicketBooked = socketManager.subscribe('ticket_booked', async (event: unknown) => {
+      const payload = (
+        event as {
+          data?: {
+            game_id?: string
+            ticket_id?: string
+            status?: string
+            player_name?: string
+          }
+        }
+      ).data
+
+      const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
+      if (!eventGameId || !gameId || eventGameId !== gameId) return
+
+      const ticketId = typeof payload?.ticket_id === 'string' ? payload.ticket_id : ''
+      if (ticketId) {
+        setTickets((current) =>
+          current.map((ticket) =>
+            ticket.id === ticketId
+              ? {
+                  ...ticket,
+                  status: typeof payload?.status === 'string' ? payload.status : ticket.status,
+                  player_name:
+                    typeof payload?.player_name === 'string' && payload.player_name.length > 0
+                      ? payload.player_name
+                      : ticket.player_name,
+                  requested_by_name:
+                    typeof payload?.player_name === 'string' && payload.player_name.length > 0
+                      ? payload.player_name
+                      : ticket.requested_by_name,
+                }
+              : ticket,
+          ),
+        )
+      }
+
+      try {
+        const freshTickets = await getTickets(eventGameId)
+        setTicketsFromBackend(eventGameId, freshTickets)
+        setTickets(freshTickets)
+      } catch {
+        return
+      }
+    })
+
     return () => {
-      unsubscribe()
+      unsubNewGame()
+      unsubTicketsGenerated()
+      unsubTicketBooked()
     }
   }, [gameId, setTicketsFromBackend])
 
@@ -496,10 +591,24 @@ const AdminDashboard = () => {
     const query = searchKeyword.trim().toLowerCase()
     if (!query) return tickets
     return tickets.filter((ticket) => {
-      const value = `${ticket.ticket_number} ${ticket.player_name ?? ''} ${ticket.status}`.toLowerCase()
+      const value = [
+        ticket.ticket_number,
+        ticket.player_name ?? '',
+        ticket.player_phone ?? '',
+        ticket.requested_by_name ?? '',
+        ticket.requested_by_whatsapp ?? '',
+        normalizeTicketStatus(ticket.status),
+      ]
+        .join(' ')
+        .toLowerCase()
       return value.includes(query)
     })
   }, [tickets, searchKeyword])
+
+  const pendingTickets = useMemo(
+    () => filteredTickets.filter((ticket) => normalizeTicketStatus(ticket.status) === 'PENDING'),
+    [filteredTickets],
+  )
 
   const claimMonitorRows = useMemo(() => {
     return CLAIM_MONITOR_ORDER.map((row) => {
@@ -516,28 +625,61 @@ const AdminDashboard = () => {
     })
   }, [lockedPrizeTypes, mergedWinners, prizes])
 
-  const mergeBookedTickets = useCallback((bookedTickets: TicketResponse[]) => {
-    if (!bookedTickets.length) return
-    // Merge updates locally so the UI stays fresh even if a refresh call fails.
-    setTickets((prev) => {
-      if (!prev.length) return prev
-      const bookedMap = new Map(bookedTickets.map((ticket) => [ticket.ticket_number, ticket]))
-      let changed = false
-      const next = prev.map((ticket) => {
-        const booked = bookedMap.get(ticket.ticket_number)
-        if (!booked) return ticket
-        changed = true
-        return { ...ticket, ...booked, status: 'BOOKED' as const }
-      })
-      bookedTickets.forEach((ticket) => {
-        if (!prev.some((item) => item.ticket_number === ticket.ticket_number)) {
-          next.push(ticket)
-          changed = true
-        }
-      })
-      return changed ? next : prev
-    })
-  }, [])
+  const refreshTicketsAndBusiness = useCallback(async (selectedGameId: string) => {
+    const [freshTickets, freshBusiness] = await Promise.all([
+      getTickets(selectedGameId),
+      getGameBusinessSummary(selectedGameId),
+    ])
+    setTicketsFromBackend(selectedGameId, freshTickets)
+    setTickets(freshTickets)
+    setBusiness(freshBusiness)
+  }, [setTicketsFromBackend])
+
+  const handleApprovePendingRequest = async (ticket: TicketResponse) => {
+    if (!gameId) return
+    if (!ticket.id) {
+      setActionMessage('Ticket id is missing for this request. Refresh and try again.')
+      return
+    }
+
+    setPendingActionTicketId(ticket.id)
+    setPendingActionType('approve')
+    setActionMessage('')
+    try {
+      await confirmTicketRequest(ticket.id)
+      await refreshTicketsAndBusiness(gameId)
+      setSearchKeyword('')
+      setActionMessage(`Ticket ${ticket.ticket_number} confirmed.`)
+    } catch (approveError) {
+      setActionMessage(getErrorMessage(approveError))
+    } finally {
+      setPendingActionTicketId(null)
+      setPendingActionType(null)
+    }
+  }
+
+  const handleRejectPendingRequest = async (ticket: TicketResponse) => {
+    if (!gameId) return
+    if (!ticket.id) {
+      setActionMessage('Ticket id is missing for this request. Refresh and try again.')
+      return
+    }
+
+    setPendingActionTicketId(ticket.id)
+    setPendingActionType('reject')
+    setActionMessage('')
+    try {
+      await rejectTicketRequest(ticket.id)
+      await refreshTicketsAndBusiness(gameId)
+      setSearchKeyword('')
+      setActionMessage(`Ticket ${ticket.ticket_number} request rejected.`)
+    } catch (rejectError) {
+      setActionMessage(getErrorMessage(rejectError))
+    } finally {
+      setPendingActionTicketId(null)
+      setPendingActionType(null)
+    }
+  }
 
   const handleSettingsSave = async () => {
     setSavingSettings(true)
@@ -548,6 +690,7 @@ const AdminDashboard = () => {
         total_tickets: Number(settingsForm.totalTicketLimit),
         ticket_price: Number(settingsForm.ticketPrice),
         agent_commission: Number(settingsForm.agentCommission || 0),
+        agent_id: settingsForm.agentId ? Number(settingsForm.agentId) : null,
         booking_status: settingsForm.bookingStatus,
         website_status: settingsForm.websiteStatus,
       })
@@ -739,68 +882,6 @@ const AdminDashboard = () => {
     }
   }
 
-  const handleBookTicket = async () => {
-    if (!gameId) return
-    setBookingTicket(true)
-    setActionMessage('')
-    try {
-      if (!bookingForm.playerName.trim()) {
-        throw new Error('Player name is required.')
-      }
-      if (!bookingForm.playerPhone.trim()) {
-        throw new Error('Player phone is required.')
-      }
-      const bookingPayload: {
-        game_id: string
-        ticket_number?: number
-        booking_mode: 'RANDOM' | 'HALF_SHEET' | 'FULL_SHEET'
-        player_name: string
-        player_phone: string
-      } = {
-        game_id: gameId,
-        booking_mode: bookingForm.bookingMode,
-        player_name: bookingForm.playerName,
-        player_phone: bookingForm.playerPhone,
-      }
-
-      if (bookingForm.bookingMode === 'RANDOM') {
-        if (!bookingForm.ticketNumber.trim()) {
-          throw new Error('Ticket number is required for RANDOM booking.')
-        }
-        bookingPayload.ticket_number = Number(bookingForm.ticketNumber)
-      }
-
-      const bookingResult = await bookTicket(bookingPayload)
-      const bookedTickets = Array.isArray(bookingResult?.booked_tickets)
-        ? (bookingResult.booked_tickets as TicketResponse[])
-        : []
-      mergeBookedTickets(bookedTickets)
-      let latestBusiness = null
-      try {
-        const [freshTickets, freshBusiness] = await Promise.all([
-          getTickets(gameId),
-          getGameBusinessSummary(gameId),
-        ])
-        setTicketsFromBackend(gameId, freshTickets)
-        setTickets(freshTickets)
-        latestBusiness = freshBusiness
-      } catch {
-        // Keep merged tickets if the refresh fails to avoid stale UI.
-      }
-      setSearchKeyword('')
-      if (latestBusiness) {
-        setBusiness(latestBusiness)
-      }
-      const bookedCount = Number(bookingResult?.total_booked || 1)
-      setActionMessage(`${bookedCount} ticket${bookedCount === 1 ? '' : 's'} booked.`)
-      setBookingForm({ ticketNumber: '', bookingMode: bookingForm.bookingMode, playerName: '', playerPhone: '' })
-    } catch (bookError) {
-      setActionMessage(getErrorMessage(bookError))
-    } finally {
-      setBookingTicket(false)
-    }
-  }
-
   const resetLocalAdminState = () => {
     setGameId('')
     setSummary(null)
@@ -815,17 +896,12 @@ const AdminDashboard = () => {
     setCallingInterval(10)
     // Reset ticket view mode when switching games.
     setShowTicketCards(false)
-    setBookingForm({
-      ticketNumber: '',
-      bookingMode: 'RANDOM',
-      playerName: '',
-      playerPhone: '',
-    })
     setSettingsForm({
       gameDateTime: '',
       totalTicketLimit: '',
       ticketPrice: '',
       agentCommission: '',
+      agentId: '',
       bookingStatus: 'OPEN',
       websiteStatus: 'OPEN',
     })
@@ -872,7 +948,6 @@ const AdminDashboard = () => {
       handler: async () => {
         if (!gameId) return
         await resetAgent(gameId)
-        setBookingForm({ ticketNumber: '', bookingMode: 'RANDOM', playerName: '', playerPhone: '' })
         await loadAll(gameId)
         setActionMessage('Agent assignments reset.')
       },
@@ -985,7 +1060,7 @@ const AdminDashboard = () => {
           <p>
             {activeView === 'main' && 'Complete control panel for setup, run, booking, reporting, and poster.'}
             {activeView === 'run' && 'Live calling operations, call board, and claim monitoring.'}
-            {activeView === 'book' && 'Ticket loading, assignment, and booking workflow.'}
+            {activeView === 'book' && 'Review pending ticket requests and confirm or reject them.'}
             {activeView === 'list' && 'Winner history, ticket history, and business metrics.'}
             {activeView === 'prizes' && 'Configure prize types, amount, and enablement before game start.'}
             {activeView === 'poster' && 'Dividend setup and poster generation preview.'}
@@ -1017,7 +1092,7 @@ const AdminDashboard = () => {
       <section className="admin-card">
         <h2>Player Announcement</h2>
         <p className="announcement-help">
-          Send a live written message to all connected players. This does not pause or alter gameplay.
+          Send a live written message to all connected players.  For different style give prefix like [warning], [success],[danger] and default is [info].
         </p>
         <div className="announcement-form">
           <textarea
@@ -1081,6 +1156,22 @@ const AdminDashboard = () => {
                   setSettingsForm((state) => ({ ...state, agentCommission: event.target.value }))
                 }
               />
+            </label>
+            <label>
+              Agent
+              <select
+                value={settingsForm.agentId}
+                onChange={(event) =>
+                  setSettingsForm((state) => ({ ...state, agentId: event.target.value }))
+                }
+              >
+                <option value="">Select Agent</option>
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name} ({agent.whatsapp_number})
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               Booking status
@@ -1414,45 +1505,62 @@ const AdminDashboard = () => {
             />
           </div>
 
-          <div className="ticket-booker">
-            <select
-              value={bookingForm.bookingMode}
-              onChange={(event) =>
-                setBookingForm((state) => ({
-                  ...state,
-                  bookingMode: event.target.value as BookingForm['bookingMode'],
-                  ticketNumber: '',
-                }))
-              }
-            >
-              <option value="RANDOM">Random (1 ticket)</option>
-              <option value="HALF_SHEET">Half Sheet (3 tickets)</option>
-              <option value="FULL_SHEET">Full Sheet (6 tickets)</option>
-            </select>
-            <input
-              placeholder={
-                bookingForm.bookingMode === 'RANDOM'
-                  ? 'Ticket number'
-                  : 'Auto-selected by backend for grouped booking'
-              }
-              type="number"
-              value={bookingForm.ticketNumber}
-              disabled={bookingForm.bookingMode !== 'RANDOM'}
-              onChange={(event) => setBookingForm((state) => ({ ...state, ticketNumber: event.target.value }))}
-            />
-            <input
-              placeholder="Player name"
-              value={bookingForm.playerName}
-              onChange={(event) => setBookingForm((state) => ({ ...state, playerName: event.target.value }))}
-            />
-            <input
-              placeholder="Player phone"
-              value={bookingForm.playerPhone}
-              onChange={(event) => setBookingForm((state) => ({ ...state, playerPhone: event.target.value }))}
-            />
-            <button onClick={handleBookTicket} disabled={bookingTicket || running}>
-              {bookingTicket ? 'Booking...' : 'Book Ticket'}
-            </button>
+          <div className="pending-requests-panel">
+            <div className="pending-requests-head">
+              <strong>Pending ticket requests</strong>
+              <span>{pendingTickets.length}</span>
+            </div>
+            {pendingTickets.length === 0 ? (
+              <div className="pending-requests-empty">No pending booking requests.</div>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ticket</th>
+                      <th>Requested By</th>
+                      <th>WhatsApp</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingTickets.map((ticket) => {
+                      const approving =
+                        pendingActionType === 'approve' && pendingActionTicketId === ticket.id
+                      const rejecting =
+                        pendingActionType === 'reject' && pendingActionTicketId === ticket.id
+                      return (
+                        <tr key={`pending-${ticket.ticket_number}`}>
+                          <td>{ticket.ticket_number}</td>
+                          <td>{ticket.requested_by_name ?? '-'}</td>
+                          <td>{ticket.requested_by_whatsapp ?? '-'}</td>
+                          <td>
+                            <div className="pending-actions">
+                              <button
+                                type="button"
+                                className="approve-btn"
+                                onClick={() => void handleApprovePendingRequest(ticket)}
+                                disabled={!ticket.id || approving || rejecting}
+                              >
+                                {approving ? 'Approving...' : 'Approve'}
+                              </button>
+                              <button
+                                type="button"
+                                className="reject-btn"
+                                onClick={() => void handleRejectPendingRequest(ticket)}
+                                disabled={!ticket.id || approving || rejecting}
+                              >
+                                {rejecting ? 'Rejecting...' : 'Reject'}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {showTicketCards ? (
@@ -1483,10 +1591,11 @@ const AdminDashboard = () => {
                       <td>{ticket.player_name ?? '-'}</td>
                       <td>{ticket.player_phone ?? '-'}</td>
                     <td>
-                      {/* Append player name to BOOKED status without changing table structure. */}
-                      {ticket.status === 'BOOKED' && ticket.player_name
-                        ? `BOOKED : ${ticket.player_name}`
-                        : ticket.status}
+                      {normalizeTicketStatus(ticket.status) === 'CONFIRMED' && ticket.player_name
+                        ? `CONFIRMED : ${ticket.player_name}`
+                        : normalizeTicketStatus(ticket.status) === 'PENDING' && ticket.requested_by_name
+                          ? `PENDING : ${ticket.requested_by_name}`
+                          : normalizeTicketStatus(ticket.status)}
                     </td>
                       <td>{ticket.ticket_type}</td>
                     </tr>

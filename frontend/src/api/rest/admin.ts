@@ -1,17 +1,25 @@
 import { adminApiClient } from '@/api/rest/client'
-import type { ThemeName } from '@/types/backend/game'
+import type { GameAgent, ThemeName } from '@/types/backend/game'
 import type { TicketData, TicketStatus, TicketType } from '@/types/backend/ticket'
 import { toISOStringFromInput } from '@/utils/dateTime'
+
+export type AgentOption = {
+  id: number
+  name: string
+  whatsapp_number: string
+}
 
 export type AdminGameListItem = {
   id: string
   date: string
   status: string
+  calling_interval?: number
   booking_status: string
   website_status: string
   total_tickets: number
   ticket_price: number
   agent_commission: number
+  agent?: GameAgent | null
   active_theme?: ThemeName
   is_active?: boolean
 }
@@ -26,6 +34,7 @@ export type GameSummaryResponse = {
     total_tickets: number
     ticket_price: number
     agent_commission: number
+    agent?: GameAgent | null
     active_theme?: ThemeName
   }
   prizes: Array<{
@@ -112,12 +121,17 @@ export type AnnouncementResponse = {
 const normalizeGameId = (value: string): string => value.trim().replace(/^\/+|\/+$/g, '')
 
 export type TicketResponse = {
+  id?: string
+  game_id?: string
   ticket_number: number
   ticket_type: TicketType
   status: TicketStatus
   ticket_data: TicketData
   player_name: string | null
   player_phone?: string | null
+  requested_by_name?: string | null
+  requested_by_whatsapp?: string | null
+  requested_at?: string | null
   marked_numbers: number[]
   final_immutable: boolean
 }
@@ -133,14 +147,19 @@ export type GameTicketsSnapshotResponse = {
 }
 
 export const getGameSummary = async (gameId: string): Promise<GameSummaryResponse> => {
+  console.log('Fetching summary for gameId:', gameId)
   const response = await adminApiClient.get<GameSummaryResponse>(`/games/${gameId}/summary/`)
+  console.log('Summary response:', response.data)
   return response.data
 }
 
 export const listAdminGames = async (): Promise<AdminGameListItem[]> => {
-  const response = await adminApiClient.get<AdminGameListItem[]>('/games/')
+  const response = await adminApiClient.get<AdminGameListItem[]>('/games/admin/')
   return response.data
 }
+
+export const fetchAgents = async (): Promise<AgentOption[]> =>
+  (await adminApiClient.get<AgentOption[]>('/games/admin/agents/')).data
 
 export const getCurrentAdminGame = async (): Promise<AdminGameListItem> => {
   const response = await adminApiClient.get<AdminGameListItem>('/games/current/')
@@ -215,7 +234,7 @@ export const updatePrizes = async (
 
 export const getTickets = async (
   gameId: string,
-  status?: 'OPEN' | 'BOOKED',
+  status?: 'AVAILABLE' | 'PENDING' | 'CONFIRMED',
 ): Promise<TicketResponse[]> => {
   const response = await adminApiClient.get<GameTicketsSnapshotResponse>(`/games/${gameId}/tickets/`, {
     params: status ? { status } : undefined,
@@ -225,7 +244,7 @@ export const getTickets = async (
 
 export const getGameTicketsSnapshot = async (
   gameId: string,
-  status?: 'OPEN' | 'BOOKED',
+  status?: 'AVAILABLE' | 'PENDING' | 'CONFIRMED',
 ): Promise<GameTicketsSnapshotResponse> => {
   const response = await adminApiClient.get<GameTicketsSnapshotResponse>(`/games/${gameId}/tickets/`, {
     params: status ? { status } : undefined,
@@ -267,15 +286,13 @@ export const getWinners = async (gameId: string): Promise<WinnerResponse[]> => {
   return response.data
 }
 
-export const bookTicket = async (payload: {
-  game_id: string
-  ticket_number?: number
-  ticket_numbers?: number[]
-  booking_mode?: 'RANDOM' | 'HALF_SHEET' | 'FULL_SHEET'
-  player_name: string
-  player_phone: string
-}) => {
-  const response = await adminApiClient.post('/tickets/admin/book/', payload)
+export const confirmTicketRequest = async (ticketId: string) => {
+  const response = await adminApiClient.post<TicketResponse>(`/admin/tickets/${ticketId}/confirm/`)
+  return response.data
+}
+
+export const rejectTicketRequest = async (ticketId: string) => {
+  const response = await adminApiClient.post<TicketResponse>(`/admin/tickets/${ticketId}/reject/`)
   return response.data
 }
 
@@ -292,6 +309,7 @@ export const saveGameSettings = async (payload: {
   total_tickets: number
   ticket_price: number
   agent_commission: number
+  agent_id?: number | null
   booking_status: string
   website_status: string
 }) => {
@@ -300,7 +318,7 @@ export const saveGameSettings = async (payload: {
     throw new Error('Please select a valid game date and time.')
   }
 
-  const response = await adminApiClient.post('/games/', {
+  const response = await adminApiClient.post('/games/admin/', {
     ...payload,
     date: dateIso,
   })

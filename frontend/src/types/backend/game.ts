@@ -3,6 +3,12 @@ export type BookingStatus = 'OPEN' | 'CLOSED'
 export type WebsiteStatus = 'OPEN' | 'CLOSED'
 export type ThemeName = 'dark' | 'light' | 'festival-gold' | 'festival-diwali'
 
+export type GameAgent = {
+  id: number
+  name: string
+  whatsapp_number: string
+}
+
 export type PublicGame = {
   id: string
   date: string
@@ -10,6 +16,7 @@ export type PublicGame = {
   ticket_price: number
   booking_status: BookingStatus
   website_status: WebsiteStatus
+  agent?: GameAgent | null
   active_theme?: ThemeName
   is_active?: boolean
 }

@@ -121,10 +121,12 @@ def _agent_payload(agent):
 
 
 def _admin_game_payload(game):
+    game_datetime = timezone.localtime(game.game_datetime) if timezone.is_aware(game.game_datetime) else game.game_datetime
     return {
         "id": str(game.id),
-        "date": game.game_datetime,
+        "date": game_datetime.isoformat() if hasattr(game_datetime, "isoformat") else str(game_datetime),
         "status": game.status,
+        "calling_interval": game.calling_interval,
         "booking_status": game.booking_status,
         "website_status": game.website_status,
         "total_tickets": game.total_ticket_limit,
@@ -223,7 +225,7 @@ class AdminResetTicketView(APIView):
             updated = game.tickets.update(
                 player_name=None,
                 player_phone=None,
-                status=Ticket.Status.OPEN,
+                status=Ticket.Status.AVAILABLE,
                 ticket_type=Ticket.TicketType.RANDOM,
                 booked_at=None,
             )
@@ -254,7 +256,7 @@ class AdminResetAgentView(APIView):
             updated = game.tickets.update(
                 player_name=None,
                 player_phone=None,
-                status=Ticket.Status.OPEN,
+                status=Ticket.Status.AVAILABLE,
                 booked_at=None,
             )
 
@@ -516,6 +518,7 @@ class AdminGameListCreateView(APIView):
         booking_status = validated["booking_status"]
         website_status = validated["website_status"]
         active_theme = validated["active_theme"]
+        generated_count = 0
 
         with transaction.atomic():
             Game.objects.filter(is_active=True).update(is_active=False)
@@ -545,12 +548,46 @@ class AdminGameListCreateView(APIView):
                             ticket_number=ticket_number,
                             ticket_type=Ticket.TicketType.RANDOM,
                             ticket_data=ticket_data,
-                            status=Ticket.Status.OPEN,
+                            status=Ticket.Status.AVAILABLE,
                         )
                     )
                 Ticket.objects.bulk_create(tickets)
+                generated_count = len(tickets)
 
-        return Response(_admin_game_payload(game), status=201)
+        game_payload = _admin_game_payload(game)
+        print("Game created:", str(game.id))
+        channel_layer = get_channel_layer()
+        try:
+            print("Group broadcast:", "global_lobby")
+            async_to_sync(channel_layer.group_send)(
+                "global_lobby",
+                {
+                    "type": "new_game_created",
+                    "data": game_payload,
+                },
+            )
+        except Exception as exc:
+            print("Group broadcast failed (new_game_created):", str(exc))
+
+        if generated_count > 0:
+            try:
+                group_name = f"game_{str(game.id)}"
+                print("Ticket generated:", generated_count, "for game:", str(game.id))
+                print("Group broadcast:", group_name)
+                async_to_sync(channel_layer.group_send)(
+                    group_name,
+                    {
+                        "type": "tickets_generated",
+                        "data": {
+                            "game_id": str(game.id),
+                            "total_generated": generated_count,
+                        },
+                    },
+                )
+            except Exception as exc:
+                print("Group broadcast failed (tickets_generated):", str(exc))
+
+        return Response(game_payload, status=201)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -755,9 +792,15 @@ class GameBusinessSummaryView(APIView):
         tickets_qs = game.tickets.all()
         # Total ticket capacity comes from configured game settings.
         total_tickets = game.total_ticket_limit
-        tickets_booked = tickets_qs.filter(status="BOOKED").count()
-        fullsheet_booked = tickets_qs.filter(ticket_type="FULL_SHEET", status="BOOKED").count()
-        halfsheet_booked = tickets_qs.filter(ticket_type="HALF_SHEET", status="BOOKED").count()
+        tickets_booked = tickets_qs.filter(status=Ticket.Status.CONFIRMED).count()
+        fullsheet_booked = tickets_qs.filter(
+            ticket_type="FULL_SHEET",
+            status=Ticket.Status.CONFIRMED,
+        ).count()
+        halfsheet_booked = tickets_qs.filter(
+            ticket_type="HALF_SHEET",
+            status=Ticket.Status.CONFIRMED,
+        ).count()
         tickets_left = max(0, total_tickets - tickets_booked)
 
         total_prize_money = sum(p.amount for p in game.prizes.all())
@@ -785,6 +828,8 @@ class GameSummaryView(APIView):
 
     def get(self, request, game_id):
         game = get_object_or_404(Game, id=game_id)
+        print("SUMMARY CALLED")
+        print("Summary game id:", game.id)
 
         game_payload = {
             "id": str(game.id),
@@ -815,6 +860,8 @@ class GameSummaryView(APIView):
             .select_related("prize", "ticket")
             .order_by("created_at", "id")
         )
+        print("Winners count in summary:", winners.count())
+        print("Winner IDs returned:", list(winners.values_list("id", flat=True)))
         winners_payload = WinnerSerializer(winners, many=True).data
 
         called_numbers = list(game.called_numbers.values_list("number", flat=True))

@@ -35,9 +35,12 @@ type WinnerAnnouncedEvent = {
 
 type WinnerBroadcastEvent = {
   type: 'winner'
+  winner_id: string | number
+  ticket_id: string | number
+  prize_id: string | number
   winner_name: string
   prize_name: string
-  ticket_number?: number | null
+  timestamp: string
 }
 
 type AnnouncementEvent = {
@@ -104,11 +107,12 @@ const isWinnerBroadcastEvent = (payload: unknown): payload is WinnerBroadcastEve
   const event = payload as Record<string, unknown>
   return (
     event.type === 'winner' &&
+    (typeof event.winner_id === 'string' || Number.isInteger(event.winner_id)) &&
+    (typeof event.ticket_id === 'string' || Number.isInteger(event.ticket_id)) &&
+    (typeof event.prize_id === 'string' || Number.isInteger(event.prize_id)) &&
     typeof event.winner_name === 'string' &&
     typeof event.prize_name === 'string' &&
-    (event.ticket_number === undefined ||
-      event.ticket_number === null ||
-      Number.isInteger(event.ticket_number))
+    typeof event.timestamp === 'string'
   )
 }
 
@@ -117,6 +121,49 @@ export const useGameSocket = (gameId?: string): void => {
   const replaceFromBackendState = useGameStore((state) => state.replaceFromBackendState)
   const enqueueWinnerAnnouncement = useGameStore((state) => state.enqueueWinnerAnnouncement)
   const addAnnouncement = useAnnouncementStore((state) => state.addAnnouncement)
+  const toInteger = (value: string | number): number | null => {
+    if (typeof value === 'number' && Number.isInteger(value)) return value
+    const parsed = Number.parseInt(String(value), 10)
+    return Number.isInteger(parsed) ? parsed : null
+  }
+  const addWinnerEvent = (event: {
+    id: string | number
+    ticketId: string | number
+    prizeName: string
+    winnerName: string
+    timestamp: string
+  }) => {
+    const winnerId = toInteger(event.id)
+    const ticketId = String(event.ticketId)
+    const ticketMatch = useGameStore
+      .getState()
+      .tickets.find((ticket) => String((ticket as { id?: string }).id ?? '') === ticketId) as
+      | { ticket_number?: number }
+      | undefined
+    const resolvedTicketNumber =
+      ticketMatch && Number.isInteger(ticketMatch.ticket_number) ? ticketMatch.ticket_number : null
+
+    if (winnerId !== null && resolvedTicketNumber !== null) {
+      applyBackendEvent({
+        type: 'winner.announced',
+        winner: {
+          id: winnerId,
+          prize_type: event.prizeName,
+          prize_amount: 0,
+          ticket_number: resolvedTicketNumber,
+          player_name: event.winnerName.trim() || 'Player',
+          won_at: event.timestamp,
+        },
+      })
+    }
+
+    enqueueWinnerAnnouncement({
+      id: `winner-${String(event.id)}`,
+      winner_name: event.winnerName.trim() || 'Player',
+      prize_name: event.prizeName.trim() || 'Prize',
+      ticket_number: resolvedTicketNumber,
+    })
+  }
 
   useEffect(() => {
     if (!gameId) return
@@ -143,6 +190,12 @@ export const useGameSocket = (gameId?: string): void => {
     socketManager.connect(gameId)
 
     const unsubs = [
+      socketManager.subscribe('*', (event: unknown) => {
+        console.log('RAW SOCKET:', event)
+      }),
+      socketManager.on('connect', () => {
+        console.log('SOCKET CONNECTED')
+      }),
       socketManager.subscribe('game.started', (event: unknown) => {
         applyBackendEvent(event as EngineSocketEvent)
       }),
@@ -158,15 +211,15 @@ export const useGameSocket = (gameId?: string): void => {
         applyBackendEvent(event)
       }),
       socketManager.subscribe('winner', (event: unknown) => {
+        if (!event || typeof event !== 'object' || (event as { type?: unknown }).type !== 'winner') return
         if (!isWinnerBroadcastEvent(event)) return
-        enqueueWinnerAnnouncement({
-          id: `winner-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          winner_name: event.winner_name.trim() || 'Player',
-          prize_name: event.prize_name.trim() || 'Prize',
-          ticket_number:
-            typeof event.ticket_number === 'number' && Number.isInteger(event.ticket_number)
-              ? event.ticket_number
-              : null,
+        console.log('WINNER EVENT RECEIVED:', event)
+        addWinnerEvent({
+          id: event.winner_id,
+          ticketId: event.ticket_id,
+          prizeName: event.prize_name,
+          winnerName: event.winner_name,
+          timestamp: event.timestamp,
         })
       }),
       socketManager.subscribe('announcement', (event: unknown) => {
@@ -185,6 +238,7 @@ export const useGameSocket = (gameId?: string): void => {
         void recoverState()
       }),
     ]
+    console.log('Subscribed to winner events')
 
     return () => {
       isActive = false
