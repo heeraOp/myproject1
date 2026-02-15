@@ -332,6 +332,7 @@ const Lobby = () => {
     () => tickets.filter((ticket) => normalizeTicketStatus(ticket.status) === 'CONFIRMED').length,
     [tickets],
   )
+  const currentGame = selectedGame
 
   const ticketsLeft = useMemo(() => {
     if (!selectedGame) return 0
@@ -429,6 +430,7 @@ const Lobby = () => {
 
   return (
     <main className="lobby-shell">
+      <h1 className="player-game-title">{currentGame?.name}</h1>
       <AnnouncementBanner gameId={selectedGame?.id} />
       <section className="lobby-panel">
         <div className="lobby-actions">
