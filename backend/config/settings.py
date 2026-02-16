@@ -12,9 +12,16 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 import os
 from pathlib import Path
+from django.core.exceptions import ImproperlyConfigured
+from django.core.management.utils import get_random_secret_key
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+DJANGO_ENV = str(os.environ.get("DJANGO_ENV", "local")).strip().lower()
+ENV_FILE = BASE_DIR / (".env.production" if DJANGO_ENV == "production" else ".env.local")
+load_dotenv(ENV_FILE, override=False)
 
 
 def _env_bool(name, default=False):
@@ -44,10 +51,14 @@ def _normalize_samesite(value, default="Lax"):
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-!d_)9hl3n265h1okrfni5+o)v3%c2(xkzxchntt87w+9cdqp28'
+SECRET_KEY = str(os.environ.get("DJANGO_SECRET_KEY", "")).strip()
+if not SECRET_KEY:
+    if DJANGO_ENV == "production":
+        raise ImproperlyConfigured("DJANGO_SECRET_KEY is required for production.")
+    SECRET_KEY = get_random_secret_key()
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = _env_bool("DJANGO_DEBUG", True)
+DEBUG = _env_bool("DJANGO_DEBUG", DJANGO_ENV != "production")
 
 ALLOWED_HOSTS = _split_csv(os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1"))
 
@@ -197,6 +208,17 @@ if SESSION_COOKIE_SAMESITE == "None":
     SESSION_COOKIE_SECURE = True
 if CSRF_COOKIE_SAMESITE == "None":
     CSRF_COOKIE_SECURE = True
+
+if DEBUG:
+    SECURE_SSL_REDIRECT = False
+    SECURE_HSTS_SECONDS = 0
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
+else:
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
 
 # Celery configuration (Redis broker + django-celery-results backend).
 CELERY_BROKER_URL = 'redis://localhost:6379/0'
