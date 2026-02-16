@@ -174,7 +174,9 @@ export const useGameSocket = (gameId?: string): void => {
       if (recoveryInFlight || !isActive) return
       recoveryInFlight = true
       try {
-        const response = await fetch(`${REST_BASE_URL}/api/games/${gameId}/state/`)
+        const response = await fetch(`${REST_BASE_URL}/api/games/${gameId}/state/`, {
+          credentials: 'include',
+        })
         if (!response.ok || !isActive) return
         const payload = (await response.json()) as GameStateResponse
         if (!isActive) return

@@ -1,5 +1,6 @@
 from django.db.models import Sum
 from rest_framework.authentication import SessionAuthentication
+from rest_framework.exceptions import NotAuthenticated, PermissionDenied
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,10 +18,12 @@ class IsAdminRole(BasePermission):
     def has_permission(self, request, view):
         user = request.user
         if not user or not user.is_authenticated:
-            return False
+            raise NotAuthenticated("Authentication credentials were not provided.")
         if getattr(user, "role", None) == "ADMIN":
             return True
-        return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+        if bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)):
+            return True
+        raise PermissionDenied("You do not have permission to perform this action.")
 
 
 class RevenueReportView(APIView):

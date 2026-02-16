@@ -38,6 +38,14 @@ const normalizeWhatsAppNumber = (value: string): string => value.replace(/\D/g, 
 
 const hasValidCountryCode = (digits: string): boolean => /^[1-9]\d{10,14}$/.test(digits)
 
+const toLobbyGameStatus = (status: string | undefined): PublicGame['status'] => {
+  if (status === 'FINISHED' || status === 'ENDED') return 'ENDED'
+  if (status === 'BOOKING_OPEN' || status === 'RUNNING' || status === 'PAUSED' || status === 'CREATED') {
+    return status
+  }
+  return 'CREATED'
+}
+
 const Lobby = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -136,8 +144,11 @@ const Lobby = () => {
         setActiveTheme(currentGame.active_theme ?? null)
 
         // Public side should only ever see the backend-active game.
-        const game = currentGame
-        setGames([currentGame])
+        const game: PublicGame = {
+          ...currentGame,
+          status: toLobbyGameStatus(currentGame.status),
+        }
+        setGames([game])
         setSelectedGame(game)
 
         const gameTickets = await fetchGameTickets(game.id, playerPhone)
@@ -212,7 +223,7 @@ const Lobby = () => {
         id: nextGameId,
         name: String(payload?.name ?? incoming.name ?? 'Tambola Game'),
         date: String(payload?.date ?? new Date().toISOString()),
-        status: (payload?.status ?? 'CREATED') as PublicGame['status'],
+        status: toLobbyGameStatus(typeof payload?.status === 'string' ? payload.status : 'CREATED'),
         ticket_price: Number(payload?.ticket_price ?? 0),
         booking_status: (payload?.booking_status ?? 'OPEN') as PublicGame['booking_status'],
         website_status: (payload?.website_status ?? 'OPEN') as PublicGame['website_status'],
@@ -281,10 +292,31 @@ const Lobby = () => {
       await fetchTicketsForGame(eventGameId)
     })
 
+    const unsubGameFinished = socketManager.subscribe('game.finished', (event: unknown) => {
+      const payload = event as { status?: string }
+      const nextStatus = toLobbyGameStatus(
+        typeof payload?.status === 'string' ? payload.status : 'ENDED',
+      )
+      if (nextStatus !== 'ENDED') return
+      const activeGameId = currentGameIdRef.current
+
+      setSelectedGame((prev) => {
+        if (!prev) return prev
+        if (activeGameId && prev.id !== activeGameId) return prev
+        return { ...prev, status: 'ENDED' }
+      })
+
+      setGames((prev) => {
+        if (!activeGameId) return prev
+        return prev.map((game) => (game.id === activeGameId ? { ...game, status: 'ENDED' } : game))
+      })
+    })
+
     return () => {
       unsubNewGame()
       unsubTicketsGenerated()
       unsubTicketBooked()
+      unsubGameFinished()
     }
   }, [fetchTicketsForGame, replaceFromBackendState, setActiveTheme, setTicketsFromBackend])
 
@@ -378,6 +410,10 @@ const Lobby = () => {
 
   const handleRequestBooking = async (ticket: PlayerTicket) => {
     if (!selectedGame?.id) return
+    if (selectedGame.status === 'ENDED') {
+      setBookingNotice('Booking is closed for this game.')
+      return
+    }
     if (normalizeTicketStatus(ticket.status) !== 'AVAILABLE') return
 
     const playerNameInput = window.prompt('Enter your name')
@@ -538,6 +574,7 @@ const Lobby = () => {
               variant="player"
               onRequestBooking={handleRequestBooking}
               requestingTicketNumber={requestingTicketNumber}
+              bookingClosed={selectedGame?.status === 'ENDED'}
             />
           ))}
       </section>

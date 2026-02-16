@@ -1,4 +1,4 @@
-export type GameStatus = 'CREATED' | 'BOOKING_OPEN' | 'RUNNING' | 'PAUSED' | 'FINISHED'
+export type GameStatus = 'CREATED' | 'BOOKING_OPEN' | 'RUNNING' | 'PAUSED' | 'FINISHED' | 'ENDED'
 export type BookingStatus = 'OPEN' | 'CLOSED'
 export type WebsiteStatus = 'OPEN' | 'CLOSED'
 export type ThemeName = 'dark' | 'light' | 'festival-gold' | 'festival-diwali'

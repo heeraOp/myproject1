@@ -4,9 +4,11 @@ import { BrowserRouter } from 'react-router-dom'
 import { fetchCurrentPublicGame } from '@/api/rest/games'
 import './index.css'
 import App from './App.tsx'
+import { initGlobalAudioUnlock } from './utils/audioEngine'
 import { initTheme, setAdminTheme } from './utils/theme'
 
 initTheme()
+initGlobalAudioUnlock()
 void (async () => {
   try {
     const currentGame = await fetchCurrentPublicGame()

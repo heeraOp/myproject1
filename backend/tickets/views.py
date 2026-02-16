@@ -1,8 +1,7 @@
 from django.db import transaction
 from django.utils import timezone
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
 from rest_framework.authentication import SessionAuthentication
+from rest_framework.exceptions import NotAuthenticated, PermissionDenied
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -80,19 +79,12 @@ class IsAdminRole(BasePermission):
     def has_permission(self, request, view):
         user = request.user
         if not user or not user.is_authenticated:
-            return False
+            raise NotAuthenticated("Authentication credentials were not provided.")
         if getattr(user, "role", None) == "ADMIN":
             return True
-        return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
-
-
-class CsrfExemptSessionAuthentication(SessionAuthentication):
-    """
-    Session auth without CSRF enforcement (for API clients like Postman).
-    """
-
-    def enforce_csrf(self, request):
-        return
+        if bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)):
+            return True
+        raise PermissionDenied("You do not have permission to perform this action.")
 
 
 def _ticket_payload(ticket):
@@ -144,10 +136,9 @@ def _broadcast_tickets_generated(game, total_generated):
         print("Group broadcast failed (tickets_generated):", str(exc))
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminTicketBookingView(APIView):
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def post(self, request):
         serializer = AdminTicketBookingSerializer(data=request.data)
@@ -315,10 +306,9 @@ class TicketRequestBookingView(APIView):
         return Response(_ticket_payload(ticket))
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminConfirmBookingView(APIView):
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def post(self, request, ticket_id):
         with transaction.atomic():
@@ -345,10 +335,9 @@ class AdminConfirmBookingView(APIView):
         return Response(_ticket_payload(ticket))
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminRejectBookingView(APIView):
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def post(self, request, ticket_id):
         with transaction.atomic():
@@ -382,10 +371,9 @@ class AdminRejectBookingView(APIView):
         return Response(_ticket_payload(ticket))
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminBulkTicketGenerateView(APIView):
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def post(self, request):
         serializer = AdminBulkTicketGenerateSerializer(data=request.data)

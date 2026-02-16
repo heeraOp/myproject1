@@ -1,74 +1,163 @@
 .poster-shell {
   min-height: 100vh;
-  padding: 24px 16px 40px;
-  background: radial-gradient(circle at top, var(--color-5a2b99) 0%, var(--color-2b0e4f) 55%, var(--color-120623) 100%);
-  color: var(--color-fff);
+  padding: 30px 16px 40px;
+  background: radial-gradient(circle at top, #5a2b99 0%, #2b0e4f 60%, #120623 100%);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20px;
+  gap: 24px;
+  color: white;
 }
 
 .poster-card {
-  width: min(420px, 100%);
-  background: linear-gradient(180deg, var(--color-5d1b82) 0%, var(--color-3b0f57) 60%, var(--color-2a0b3d) 100%);
-  border: 6px solid var(--color-f2f2f2);
-  padding: 22px 18px;
-  border-radius: 10px;
-  box-shadow: var(--shadow);
+  width: min(480px, 100%);
+  min-height: 720px;
+  border: 8px solid white;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  background-size: cover;
+  background-position: center;
+  position: relative;
+}
+
+.poster-overlay {
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.7) 0%,
+    rgba(0, 0, 0, 0.85) 100%
+  );
+  padding: 28px 22px 30px;
+  height: 100%;
   text-align: center;
+}
+
+.poster-brand {
+  font-size: 14px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  opacity: 0.9;
+  margin-bottom: 8px;
 }
 
 .poster-title {
   font-family: 'Bebas Neue', sans-serif;
-  letter-spacing: 1px;
-  font-size: 24px;
-  border: 3px solid var(--color-ff2b2b);
-  padding: 10px 8px;
+  font-size: 42px;
+  letter-spacing: 2px;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+}
+
+.poster-agent {
+  font-size: 16px;
+  margin-bottom: 18px;
+  opacity: 0.9;
+}
+
+.poster-big-highlight {
+  font-size: 22px;
+  font-weight: 800;
+  color: #ffcc00;
+  margin-bottom: 20px;
+}
+
+.poster-ticket-box {
+  font-size: 20px;
+  font-weight: 800;
+  background: #ff1f2d;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.poster-ticket-limit {
+  font-size: 18px;
+  font-weight: 700;
   margin-bottom: 8px;
 }
 
-.poster-subtitle {
+.poster-date {
+  font-size: 18px;
   font-weight: 700;
-  margin-bottom: 12px;
-  color: var(--color-ffb347);
-}
-
-.poster-highlight {
-  background: var(--color-a45cf5);
-  margin: 6px 0;
-  padding: 6px 8px;
-  border-radius: 6px;
-  font-weight: 700;
-}
-
-.poster-prizes {
-  margin: 14px 0;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px 12px;
-  text-align: left;
-  font-weight: 600;
-}
-
-.poster-footer {
-  font-size: 12px;
-  margin-top: 12px;
-  color: var(--color-e6d7ff);
+  margin-bottom: 10px;
 }
 
 .poster-contact {
-  font-size: 12px;
-  margin-top: 10px;
-  color: var(--color-e6d7ff);
+  font-size: 16px;
+  font-weight: 800;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 18px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+}
+
+.poster-section-title {
+  font-size: 20px;
+  font-weight: 800;
+  margin-bottom: 12px;
+  letter-spacing: 1px;
+}
+
+.poster-prizes {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  row-gap: 8px;
+  column-gap: 10px;
+  font-size: 16px;
+  font-weight: 800;
+  margin-bottom: 24px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.poster-prizes > div {
+  color: #ffffff;
+  background: rgba(6, 8, 18, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  padding: 8px 10px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.poster-prizes .amount {
+  font-weight: 900;
+  text-align: right;
+  justify-self: stretch;
+  min-width: 96px;
+}
+
+.poster-cta {
+  font-size: 18px;
+  font-weight: 800;
+  background: #ffcc00;
+  color: black;
+  padding: 12px;
+  border-radius: 8px;
+  margin-top: 12px;
 }
 
 .print-button {
-  width: min(420px, 100%);
+  width: min(480px, 100%);
   padding: 14px;
   border: none;
-  border-radius: 8px;
-  background: var(--color-ff1f2d);
-  color: var(--color-fff);
-  font-weight: 700;
+  border-radius: 10px;
+  background: #ff1f2d;
+  color: white;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+@media print {
+  .poster-shell {
+    background: none;
+  }
+
+  .print-button {
+    display: none;
+  }
 }

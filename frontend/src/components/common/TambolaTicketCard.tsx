@@ -7,6 +7,7 @@ type TambolaTicketCardProps = {
   variant?: 'admin' | 'player'
   onRequestBooking?: (ticket: PlayerTicket) => void
   requestingTicketNumber?: number | null
+  bookingClosed?: boolean
 }
 
 const TambolaTicketCard = ({
@@ -14,6 +15,7 @@ const TambolaTicketCard = ({
   variant = 'admin',
   onRequestBooking,
   requestingTicketNumber = null,
+  bookingClosed = false,
 }: TambolaTicketCardProps) => {
   const normalizedStatus = normalizeTicketStatus(ticket.status)
   const isConfirmed = normalizedStatus === 'CONFIRMED'
@@ -60,9 +62,9 @@ const TambolaTicketCard = ({
             type="button"
             className="ticket-request-btn"
             onClick={() => onRequestBooking(ticket)}
-            disabled={isRequesting}
+            disabled={isRequesting || bookingClosed}
           >
-            {isRequesting ? 'Requesting...' : 'Book Ticket'}
+            {isRequesting ? 'Requesting...' : bookingClosed ? 'Booking Closed' : 'Book Ticket'}
           </button>
         ) : (
           <span

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import confetti from 'canvas-confetti'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useGameStore } from '@/app/store/game.store'
+import { initGlobalAudioUnlock, playAudioElementSafely } from '@/utils/audioEngine'
 import './WinnerCelebrationOverlay.css'
 
 const AUTO_DISMISS_MS = 3000
@@ -74,6 +75,7 @@ const WinnerCelebrationOverlay = () => {
   )
 
   useEffect(() => {
+    initGlobalAudioUnlock()
     if (!audioRef.current) {
       audioRef.current = new Audio('/sounds/winner.mp3')
       audioRef.current.preload = 'auto'
@@ -94,7 +96,7 @@ const WinnerCelebrationOverlay = () => {
     if (audioRef.current) {
       audioRef.current.pause()
       audioRef.current.currentTime = 0
-      void audioRef.current.play().catch(() => {})
+      void playAudioElementSafely(audioRef.current)
     }
   }, [activeWinner?.id, activeWinner, dismissWinnerAnnouncement])
 

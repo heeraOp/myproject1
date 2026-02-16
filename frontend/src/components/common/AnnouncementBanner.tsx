@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { type AnnouncementType, useAnnouncementStore } from '@/app/store/announcement.store'
+import { initGlobalAudioUnlock, playAudioElementSafely } from '@/utils/audioEngine'
 import './AnnouncementBanner.css'
 
 type AnnouncementBannerProps = {
@@ -75,6 +76,10 @@ const AnnouncementBanner = ({
   const icon = ICON_MAP[announcementType]
 
   useEffect(() => {
+    initGlobalAudioUnlock()
+  }, [])
+
+  useEffect(() => {
     if (!latestAnnouncement) {
       setIsVisible(false)
       return
@@ -111,7 +116,7 @@ const AnnouncementBanner = ({
         activeAudioRef.current = nextAudio
         nextAudio.pause()
         nextAudio.currentTime = 0
-        void nextAudio.play().catch(() => {})
+        void playAudioElementSafely(nextAudio)
       }
     }
   }, [latestAnnouncement?.id, latestAnnouncement, announcementType, autoHideMs, dismissAnnouncement, enableSound])

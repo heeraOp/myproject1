@@ -1,12 +1,20 @@
 from django.contrib.auth import authenticate, login
 from django.middleware.csrf import get_token
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.exceptions import NotAuthenticated
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .serializers import UserRegistrationSerializer
+
+
+def _is_admin_user(user):
+    if not user or not user.is_authenticated:
+        return False
+    if getattr(user, "role", None) == "ADMIN":
+        return True
+    return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
 
 class CsrfTokenView(APIView):
     authentication_classes = []
@@ -15,7 +23,7 @@ class CsrfTokenView(APIView):
     def get(self, request):
         return Response({"csrfToken": get_token(request)})
 
-@method_decorator(csrf_exempt, name="dispatch")
+
 class LoginView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -35,7 +43,6 @@ class LoginView(APIView):
         return Response({"success": True})
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class RegistrationView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -47,3 +54,24 @@ class RegistrationView(APIView):
 
         user = serializer.save()
         return Response({"username": user.username, "role": user.role})
+
+
+class CurrentUserView(APIView):
+    authentication_classes = [SessionAuthentication]
+
+    def get(self, request):
+        user = request.user
+        if not user or not user.is_authenticated:
+            raise NotAuthenticated("Authentication credentials were not provided.")
+
+        return Response(
+            {
+                "id": user.id,
+                "username": user.username,
+                "role": getattr(user, "role", None),
+                "is_staff": bool(getattr(user, "is_staff", False)),
+                "is_superuser": bool(getattr(user, "is_superuser", False)),
+                "is_admin": _is_admin_user(user),
+                "authenticated": True,
+            }
+        )

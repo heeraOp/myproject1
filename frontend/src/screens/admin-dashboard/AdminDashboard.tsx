@@ -36,7 +36,7 @@ import {
 import { useGameSocket } from '@/app/hooks/useGameSocket'
 import { useBingoCaller } from '@/app/hooks/useBingoCaller'
 import { useGameStore } from '@/app/store/game.store'
-import { useVoiceModeStore, type VoiceMode } from '@/app/store/voiceMode.store'
+import { useVoiceModeStore, type VoiceMode, VOICE_MODE_OPTIONS } from '@/app/store/voiceMode.store'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
 import { socketManager } from '@/api/websocket/socketManager'
 import { jsPDF } from 'jspdf'
@@ -463,6 +463,35 @@ const AdminDashboard = () => {
   }, [gameId, liveTickets, storeGameId])
 
   useEffect(() => {
+    if (!gameId || storeGameId !== gameId) return
+    if (liveStatus !== 'FINISHED' && liveCalledNumbers.length < 90) return
+
+    setSummary((previous) => {
+      if (!previous || previous.game.status === 'FINISHED') return previous
+      return {
+        ...previous,
+        game: {
+          ...previous.game,
+          status: 'FINISHED',
+        },
+      }
+    })
+
+    setGames((previous) => {
+      let changed = false
+      const next = previous.map((game) => {
+        if (game.id !== gameId || game.status === 'FINISHED') return game
+        changed = true
+        return {
+          ...game,
+          status: 'FINISHED',
+        }
+      })
+      return changed ? next : previous
+    })
+  }, [gameId, liveCalledNumbers.length, liveStatus, storeGameId])
+
+  useEffect(() => {
     setEditablePrizes(buildPrizeSetupRows(prizeTypes, prizes))
   }, [prizeTypes, prizes])
 
@@ -571,6 +600,9 @@ const AdminDashboard = () => {
     business && business.total_tickets > 0
       ? business.total_tickets
       : (summary?.game.total_tickets ?? '-')
+  const selectedPosterGame = games.find((item) => item.id === gameId)
+  const posterContactNumber =
+    summary?.game.agent?.whatsapp_number ?? selectedPosterGame?.agent?.whatsapp_number ?? ''
   const summaryStatus = summary?.game.status ?? 'CREATED'
   const effectiveStatus =
     liveStatus !== 'IDLE'
@@ -868,6 +900,8 @@ const AdminDashboard = () => {
     const selectedPosterBackground =
       wallpaperRegistry[posterBackgroundKey]?.poster ?? wallpaperRegistry.default.poster
     const margin = 48
+    const contentWidth = pageWidth - margin * 2
+    const centerX = pageWidth / 2
     let y = margin
 
     try {
@@ -876,45 +910,120 @@ const AdminDashboard = () => {
       // If wallpaper fails to load, keep existing text-only PDF output.
     }
 
-    doc.setTextColor(16, 18, 30)
+    const drawDate = formatDateTime(selectedPosterGame?.date)
+    const gameTitle = (settingsForm.gameName || 'Tambola Prize List').toUpperCase()
+    const ticketPrice = settingsForm.ticketPrice || '-'
+    const ticketLimit = summary?.game.total_tickets ?? (settingsForm.totalTicketLimit || '-')
+    const contactNumber = posterContactNumber.trim()
+    const topSectionHeight = contactNumber ? 242 : 218
+
+    doc.setFillColor(12, 18, 42)
+    doc.roundedRect(margin - 10, y - 18, contentWidth + 20, topSectionHeight, 14, 14, 'F')
+
+    doc.setTextColor(255, 255, 255)
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(26)
-    doc.text(settingsForm.gameName || 'Tambola Prize List', margin, y)
+    doc.setFontSize(40)
+    const titleLines = doc.splitTextToSize(gameTitle, contentWidth - 30)
+    doc.text(titleLines, centerX, y + 20, { align: 'center' })
+    y += 20 + titleLines.length * 40
+
+    doc.setTextColor(255, 215, 70)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(23)
+    doc.text('WIN EXCITING CASH PRIZES!', centerX, y, { align: 'center' })
+    y += 24
+
+    doc.setFillColor(255, 232, 92)
+    doc.roundedRect(margin + 28, y - 16, contentWidth - 56, 38, 8, 8, 'F')
+    doc.setTextColor(28, 18, 8)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(22)
+    doc.text(`TICKET PRICE: RS. ${ticketPrice}`, centerX, y + 8, { align: 'center' })
+    y += 42
+
+    doc.setTextColor(255, 255, 255)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(17)
+    doc.text(`TICKET LIMIT: ${ticketLimit}`, centerX, y, { align: 'center' })
     y += 22
 
-    const drawDate = formatDateTime(games.find((item) => item.id === gameId)?.date)
     if (drawDate !== '-') {
+      doc.setTextColor(247, 250, 255)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(15)
+      doc.text(`DRAW DATE & TIME: ${drawDate}`, centerX, y, { align: 'center' })
+      y += 18
+    }
+
+    if (contactNumber) {
+      doc.setTextColor(255, 255, 255)
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(14)
-      doc.text(`Draw: ${drawDate}`, margin, y)
+      doc.text(`CONTACT: ${contactNumber}`, centerX, y, { align: 'center' })
       y += 16
     }
 
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(14)
-    y += 8
-    doc.text('Prize Type', margin, y)
-    doc.text('Amount', pageWidth - margin, y, { align: 'right' })
-    y += 8
-    doc.setLineWidth(0.6)
-    doc.line(margin, y, pageWidth - margin, y)
-    y += 14
+    y += 16
 
+    doc.setFillColor(250, 200, 35)
+    doc.roundedRect(margin, y - 16, contentWidth, 30, 8, 8, 'F')
+    doc.setTextColor(20, 18, 16)
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(14)
-    enabledPrizes.forEach((prize) => {
-      if (y > pageHeight - margin - 24) {
+    doc.setFontSize(21)
+    doc.text('PRIZES', centerX, y + 4, { align: 'center' })
+    y += 34
+
+    const drawPrizeHeader = () => {
+      doc.setFillColor(20, 28, 48)
+      doc.roundedRect(margin, y - 15, contentWidth, 28, 6, 6, 'F')
+      doc.setTextColor(255, 255, 255)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(14)
+      doc.text('Prize Name', margin + 12, y + 3)
+      doc.text('Amount', pageWidth - margin - 12, y + 3, { align: 'right' })
+      y += 24
+    }
+
+    drawPrizeHeader()
+
+    enabledPrizes.forEach((prize, index) => {
+      if (y > pageHeight - margin - 110) {
         doc.addPage()
-        y = margin
+        y = margin + 16
+        drawPrizeHeader()
       }
+
+      if (index % 2 === 0) {
+        doc.setFillColor(18, 27, 49)
+      } else {
+        doc.setFillColor(28, 39, 68)
+      }
+      doc.roundedRect(margin, y - 14, contentWidth, 24, 4, 4, 'F')
+
       const label = PRIZE_LABEL_MAP[prize.prize_type] ?? prize.prize_type
-      doc.text(label, margin, y)
-      doc.text(String(prize.amount), pageWidth - margin, y, { align: 'right' })
-      y += 18
+      doc.setTextColor(255, 255, 255)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(14)
+      doc.text(label, margin + 10, y + 2)
+      doc.text(`RS. ${prize.amount}`, pageWidth - margin - 10, y + 2, { align: 'right' })
+      y += 22
     })
 
+    if (y > pageHeight - margin - 72) {
+      doc.addPage()
+      y = margin + 24
+    }
+
+    doc.setFillColor(231, 73, 55)
+    doc.roundedRect(margin, y + 6, contentWidth, 44, 10, 10, 'F')
+    doc.setTextColor(255, 255, 255)
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(13)
+    doc.setFontSize(17)
+    doc.text('BOOK NOW & DON’T MISS THE FUN!', centerX, y + 34, { align: 'center' })
+
+    doc.setTextColor(40, 44, 52)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
     doc.text('Good Luck & Happy Playing', margin, pageHeight - margin)
 
     doc.save('tambola-prize-list.pdf')
@@ -1449,11 +1558,13 @@ const AdminDashboard = () => {
                 value={voiceMode}
                 onChange={(event) => setVoiceMode(event.target.value as VoiceMode)}
               >
-                <option value="CLASSIC">Classic</option>
-                <option value="FUNNY">Funny</option>
-                <option value="CRAZY">Crazy</option>
+                {VOICE_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
-              {isSpeechSupported && !isAudioReady && (
+              {isSpeechSupported && (!isAudioReady || Boolean(audioBlockedMessage)) && (
                 <button type="button" className="secondary-btn voice-unlock-btn" onClick={unlockAudio}>
                   Enable Sound
                 </button>
@@ -1721,14 +1832,15 @@ const AdminDashboard = () => {
             }}
           >
             <h3>{settingsForm.gameName || 'Tambola Big Win'}</h3>
-            <p>Draw: {formatDateTime(games.find((item) => item.id === gameId)?.date)}</p>
+            <p>Draw: {formatDateTime(selectedPosterGame?.date)}</p>
             <p>Ticket price: {settingsForm.ticketPrice || '-'}</p>
             <p>Total tickets: {totalTicketsValue}</p>
-            <ul>
+            {posterContactNumber ? <p className="poster-preview-contact">Contact: {posterContactNumber}</p> : null}
+            <ul className="poster-preview-prize-list">
               {prizes.map((prize) => (
-                <li key={prize.prize_type}>
-                  <span>{PRIZE_LABEL_MAP[prize.prize_type] ?? prize.prize_type}</span>
-                  <span>{prize.amount}</span>
+                <li key={prize.prize_type} className="poster-preview-prize-row">
+                  <span className="poster-preview-prize-name">{PRIZE_LABEL_MAP[prize.prize_type] ?? prize.prize_type}</span>
+                  <span className="poster-preview-prize-amount">RS. {prize.amount}</span>
                 </li>
               ))}
             </ul>

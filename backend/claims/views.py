@@ -1,3 +1,5 @@
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.exceptions import NotAuthenticated, PermissionDenied
 from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -22,10 +24,12 @@ class IsAdminRole(BasePermission):
     def has_permission(self, request, view):
         user = request.user
         if not user or not user.is_authenticated:
-            return False
+            raise NotAuthenticated("Authentication credentials were not provided.")
         if getattr(user, "role", None) == "ADMIN":
             return True
-        return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+        if bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)):
+            return True
+        raise PermissionDenied("You do not have permission to perform this action.")
 
 
 class AdminEvaluateClaimsView(APIView):
@@ -33,6 +37,7 @@ class AdminEvaluateClaimsView(APIView):
     Admin-only endpoint to evaluate claims for a game.
     """
 
+    authentication_classes = [SessionAuthentication]
     permission_classes = [IsAdminRole]
 
     def post(self, request):
@@ -121,6 +126,7 @@ def _parse_enabled(value, default=False):
 
 
 class PrizeListUpdateView(APIView):
+    authentication_classes = [SessionAuthentication]
     def get_permissions(self):
         if self.request.method == "GET":
             return [AllowAny()]
@@ -242,6 +248,7 @@ class PrizeTypeListView(APIView):
     Admin-only endpoint to list all available prize types.
     """
 
+    authentication_classes = [SessionAuthentication]
     permission_classes = [IsAdminRole]
 
     def get(self, request):
@@ -251,6 +258,7 @@ class PrizeTypeListView(APIView):
 
 
 class PrizeDetailUpdateView(APIView):
+    authentication_classes = [SessionAuthentication]
     permission_classes = [IsAdminRole]
 
     def patch(self, request, game_id, prize_type):

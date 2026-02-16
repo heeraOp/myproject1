@@ -198,12 +198,16 @@ export const useGameStore = create<GameStateStore>((set) => ({
         const nextTickets = state.tickets.map((ticket) =>
           withMarkedNumbers(ticket, calledSet, false),
         )
+        const reachedEnd = nextCalledNumbers.length >= 90
 
         return {
           ...state,
+          status: reachedEnd ? 'FINISHED' : state.status,
           currentNumber: currentNumberFromList,
           calledNumbers: nextCalledNumbers,
           tickets: nextTickets,
+          isInteractionFrozen: reachedEnd ? true : state.isInteractionFrozen,
+          canSubmitClaims: reachedEnd ? false : state.canSubmitClaims,
         }
       }
 
@@ -252,6 +256,8 @@ export const useGameStore = create<GameStateStore>((set) => ({
       const wonPrizes = Array.isArray(payload?.won_prizes) ? payload.won_prizes : []
       const mappedStatus = mapBackendStatus(payload?.game?.status ?? '')
       const calledNumbers = rawCalledNumbers
+      const resolvedStatus: GameStatus =
+        mappedStatus === 'FINISHED' || calledNumbers.length >= 90 ? 'FINISHED' : mappedStatus
       const calledSet = new Set(calledNumbers)
       const winnersFromState: Winner[] = wonPrizes.map((winner, index) => ({
         id: index + 1,
@@ -263,13 +269,13 @@ export const useGameStore = create<GameStateStore>((set) => ({
       const nextTickets =
         state.gameId && payload?.game?.id && state.gameId === payload.game.id
           ? state.tickets.map((ticket) =>
-              withMarkedNumbers(ticket, calledSet, mappedStatus === 'FINISHED'),
+              withMarkedNumbers(ticket, calledSet, resolvedStatus === 'FINISHED'),
             )
           : state.tickets
 
       return {
         gameId: payload?.game?.id ?? state.gameId,
-        status: mappedStatus,
+        status: resolvedStatus,
         callingInterval:
           typeof payload?.game?.calling_interval === 'number' ? payload.game.calling_interval : null,
         currentNumber: calledNumbers.length ? calledNumbers[calledNumbers.length - 1] : null,
@@ -281,8 +287,8 @@ export const useGameStore = create<GameStateStore>((set) => ({
             ? []
             : state.winnerQueue,
         lockedPrizeTypes,
-        isInteractionFrozen: mappedStatus === 'FINISHED',
-        canSubmitClaims: mappedStatus !== 'FINISHED',
+        isInteractionFrozen: resolvedStatus === 'FINISHED',
+        canSubmitClaims: resolvedStatus !== 'FINISHED',
       }
     }),
   setTicketsFromBackend: (gameId, tickets) =>

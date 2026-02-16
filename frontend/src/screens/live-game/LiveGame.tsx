@@ -18,7 +18,7 @@ import { socketManager } from '@/api/websocket/socketManager'
 import { useGameSocket } from '@/app/hooks/useGameSocket'
 import { useBingoCaller } from '@/app/hooks/useBingoCaller'
 import { useGameStore } from '@/app/store/game.store'
-import { useVoiceModeStore, type VoiceMode } from '@/app/store/voiceMode.store'
+import { useVoiceModeStore, type VoiceMode, VOICE_MODE_OPTIONS } from '@/app/store/voiceMode.store'
 import type { PublicGame } from '@/types/backend/game'
 import type { PlayerTicket } from '@/types/backend/ticket'
 import {
@@ -309,6 +309,35 @@ const LiveGame = () => {
     setTickets(liveTickets as PlayerTicket[])
   }, [liveTickets, selectedGameId, storeGameId])
 
+  useEffect(() => {
+    if (!selectedGameId || storeGameId !== selectedGameId) return
+    if (liveStatus !== 'FINISHED' && calledNumbers.length < 90) return
+
+    setSummary((previous) => {
+      if (!previous || previous.game.status === 'FINISHED') return previous
+      return {
+        ...previous,
+        game: {
+          ...previous.game,
+          status: 'FINISHED',
+        },
+      }
+    })
+
+    setGames((previous) => {
+      let changed = false
+      const next = previous.map((game) => {
+        if (game.id !== selectedGameId || game.status === 'FINISHED') return game
+        changed = true
+        return {
+          ...game,
+          status: 'FINISHED' as PublicGame['status'],
+        }
+      })
+      return changed ? next : previous
+    })
+  }, [calledNumbers.length, liveStatus, selectedGameId, storeGameId])
+
   const selectedGame = useMemo(
     () => games.find((game) => game.id === selectedGameId) ?? null,
     [games, selectedGameId],
@@ -337,6 +366,7 @@ const LiveGame = () => {
   )
 
   const effectiveStatus = useMemo(() => {
+    if (liveStatus === 'FINISHED') return 'FINISHED'
     if (summary?.game.status === 'FINISHED') return 'FINISHED'
     if (liveStatus === 'RUNNING') return 'RUNNING'
     if (summary?.game.status) return summary.game.status
@@ -428,11 +458,13 @@ const LiveGame = () => {
               value={voiceMode}
               onChange={(event) => setVoiceMode(event.target.value as VoiceMode)}
             >
-              <option value="CLASSIC">Classic</option>
-              <option value="FUNNY">Funny</option>
-              <option value="CRAZY">Crazy</option>
+              {VOICE_MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
-            {isSpeechSupported && !isAudioReady && (
+            {isSpeechSupported && (!isAudioReady || Boolean(audioBlockedMessage)) && (
               <button type="button" className="ghost-btn" onClick={unlockAudio}>
                 Enable Sound
               </button>

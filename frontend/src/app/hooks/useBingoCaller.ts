@@ -1,15 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useGameStore } from '@/app/store/game.store'
-import { useVoiceModeStore } from '@/app/store/voiceMode.store'
-import { getBingoCallText, getFunnyBingoSpeechText, getFunnyVoiceStyle } from '@/utils/bingoCalls'
+import { useVoiceModeStore, type VoiceMode } from '@/app/store/voiceMode.store'
+import {
+  initGlobalAudioUnlock,
+  isAudioUnlocked,
+  resumeGlobalAudioContext,
+  subscribeAudioUnlock,
+  unlockAudioFromUserGesture,
+} from '@/utils/audioEngine'
+import { getBingoCallText } from '@/utils/bingoCalls'
+import { pickVoiceForMode, resolveSpeechConfig } from '@/voices/voiceRegistry'
 
 type BingoCallerState = {
   announcement: string
   number: number | null
+  audioUnlocked: boolean
   isAudioReady: boolean
   isSpeechSupported: boolean
   audioBlockedMessage: string | null
   unlockAudio: () => void
+}
+
+type PendingSpeechAnnouncement = {
+  number: number
+  text: string
+  voiceMode: VoiceMode
 }
 
 export const useBingoCaller = (): BingoCallerState => {
@@ -18,6 +33,7 @@ export const useBingoCaller = (): BingoCallerState => {
   const voiceMode = useVoiceModeStore((state) => state.mode)
   const [announcement, setAnnouncement] = useState('')
   const [announcementNumber, setAnnouncementNumber] = useState<number | null>(null)
+  const [audioUnlocked, setAudioUnlocked] = useState(isAudioUnlocked())
   const [isAudioReady, setIsAudioReady] = useState(false)
   const [isSpeechSupported, setIsSpeechSupported] = useState(false)
   const [audioBlockedMessage, setAudioBlockedMessage] = useState<string | null>(null)
@@ -27,6 +43,20 @@ export const useBingoCaller = (): BingoCallerState => {
   const clearTimerRef = useRef<number | null>(null)
   const healthCheckTimeoutRef = useRef<number | null>(null)
   const healthCheckInFlightRef = useRef(false)
+  const pendingSpeechRef = useRef<PendingSpeechAnnouncement | null>(null)
+
+  useEffect(() => {
+    initGlobalAudioUnlock()
+    const unsubscribe = subscribeAudioUnlock((unlocked) => {
+      setAudioUnlocked(unlocked)
+      if (!unlocked) {
+        setIsAudioReady(false)
+      }
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -42,6 +72,7 @@ export const useBingoCaller = (): BingoCallerState => {
   const resetSpeechEngine = useCallback(() => {
     if (typeof window === 'undefined') return
     if (!('speechSynthesis' in window)) return
+    void resumeGlobalAudioContext()
     try {
       // Browser audio engines can get stuck; cancel clears residual state.
       window.speechSynthesis.cancel()
@@ -55,77 +86,129 @@ export const useBingoCaller = (): BingoCallerState => {
   const runAudioHealthCheck = useCallback(() => {
     if (typeof window === 'undefined') return
     if (!('speechSynthesis' in window)) return
+    if (!isAudioUnlocked()) return
     if (healthCheckInFlightRef.current) return
     healthCheckInFlightRef.current = true
+    void (async () => {
+      await resumeGlobalAudioContext()
 
-    let started = false
-    const utterance = new SpeechSynthesisUtterance(' ')
-    utterance.rate = 1
-    utterance.pitch = 1
-    utterance.volume = 0.001
-
-    const cleanup = () => {
-      healthCheckInFlightRef.current = false
-      if (healthCheckTimeoutRef.current) {
-        window.clearTimeout(healthCheckTimeoutRef.current)
-        healthCheckTimeoutRef.current = null
-      }
-      utterance.onstart = null
-      utterance.onerror = null
-    }
-
-    utterance.onstart = () => {
-      started = true
-      // Audio is working; clear any blocked warning.
-      setAudioBlockedMessage(null)
-      cleanup()
-    }
-    utterance.onerror = () => {
-      // Browser blocked speech output.
-      setAudioBlockedMessage(
-        'Sound is blocked by your browser or system. Please unmute your browser, click anywhere on the page, and press Enable Sound.',
-      )
-      cleanup()
-    }
-
-    // Cancel any residual speech before the test utterance.
-    resetSpeechEngine()
-    window.speechSynthesis.speak(utterance)
-
-    healthCheckTimeoutRef.current = window.setTimeout(() => {
-      if (!started) {
-        // onstart never fired -> treat as blocked audio.
-        setAudioBlockedMessage(
-          'Sound is blocked by your browser or system. Please unmute your browser, click anywhere on the page, and press Enable Sound.',
-        )
-      }
-      cleanup()
-    }, 800)
-  }, [resetSpeechEngine])
-
-  const unlockAudio = useCallback(() => {
-    if (typeof window === 'undefined') return
-    if (!('speechSynthesis' in window)) return
-    try {
-      // User gesture: force audio context to resume with a tiny silent utterance.
-      resetSpeechEngine()
+      let started = false
       const utterance = new SpeechSynthesisUtterance(' ')
       utterance.rate = 1
       utterance.pitch = 1
       utterance.volume = 0.001
+
+      const cleanup = () => {
+        healthCheckInFlightRef.current = false
+        if (healthCheckTimeoutRef.current) {
+          window.clearTimeout(healthCheckTimeoutRef.current)
+          healthCheckTimeoutRef.current = null
+        }
+        utterance.onstart = null
+        utterance.onerror = null
+      }
+
+      utterance.onstart = () => {
+        started = true
+        // Audio is working; clear any blocked warning.
+        setAudioBlockedMessage(null)
+        setIsAudioReady(true)
+        cleanup()
+      }
+      utterance.onerror = () => {
+        // Browser blocked speech output.
+        setIsAudioReady(false)
+        setAudioBlockedMessage(
+          'Sound is blocked by your browser or system. Please unmute your browser, click anywhere on the page, and press Enable Sound.',
+        )
+        cleanup()
+      }
+
+      // Cancel any residual speech before the test utterance.
+      resetSpeechEngine()
       window.speechSynthesis.speak(utterance)
-      // Follow with a normal (audible) cue so user knows it's enabled.
-      const confirm = new SpeechSynthesisUtterance('Audio enabled')
-      confirm.rate = 1
-      confirm.pitch = 1
-      confirm.volume = 1
-      window.speechSynthesis.speak(confirm)
-      setIsAudioReady(true)
-      // Run a quick health check to detect blocked output.
-      runAudioHealthCheck()
-    } catch {
-      // Ignore unlock failures.
+
+      healthCheckTimeoutRef.current = window.setTimeout(() => {
+        if (!started) {
+          // onstart never fired -> treat as blocked audio.
+          setIsAudioReady(false)
+          setAudioBlockedMessage(
+            'Sound is blocked by your browser or system. Please unmute your browser, click anywhere on the page, and press Enable Sound.',
+          )
+        }
+        cleanup()
+      }, 800)
+    })()
+  }, [resetSpeechEngine])
+
+  useEffect(() => {
+    if (!audioUnlocked) {
+      setIsAudioReady(false)
+      return
     }
+    runAudioHealthCheck()
+  }, [audioUnlocked, runAudioHealthCheck])
+
+  const speakAnnouncement = useCallback(
+    async (calledNumber: number, text: string, mode: VoiceMode): Promise<boolean> => {
+      if (typeof window === 'undefined') return false
+      if (!('speechSynthesis' in window)) return false
+      if (!audioUnlocked) return false
+
+      const resumed = await resumeGlobalAudioContext()
+      if (!resumed || !isAudioUnlocked()) return false
+
+      try {
+        // Always reset before speaking to avoid stale audio engine state.
+        resetSpeechEngine()
+        const { speechText, rate, pitch } = resolveSpeechConfig(mode, calledNumber, text)
+        const utterance = new SpeechSynthesisUtterance(speechText || text)
+        const voices = window.speechSynthesis.getVoices()
+        const preferredVoice = pickVoiceForMode(voices, mode, calledNumber)
+        if (preferredVoice) {
+          utterance.voice = preferredVoice
+        }
+        utterance.rate = Math.min(1.45, Math.max(0.75, rate))
+        utterance.pitch = Math.min(2, Math.max(0.65, pitch))
+        utterance.volume = 1
+        window.speechSynthesis.speak(utterance)
+        setIsAudioReady(true)
+        setAudioBlockedMessage(null)
+        return true
+      } catch {
+        return false
+      }
+    },
+    [audioUnlocked, resetSpeechEngine],
+  )
+
+  const unlockAudio = useCallback(() => {
+    if (typeof window === 'undefined') return
+    if (!('speechSynthesis' in window)) return
+    void (async () => {
+      const unlocked = await unlockAudioFromUserGesture()
+      setAudioUnlocked(unlocked)
+      if (!unlocked) return
+      try {
+        // User gesture: force audio engine to resume with a tiny silent utterance.
+        resetSpeechEngine()
+        const utterance = new SpeechSynthesisUtterance(' ')
+        utterance.rate = 1
+        utterance.pitch = 1
+        utterance.volume = 0.001
+        window.speechSynthesis.speak(utterance)
+        // Follow with a normal (audible) cue so user knows it's enabled.
+        const confirm = new SpeechSynthesisUtterance('Audio enabled')
+        confirm.rate = 1
+        confirm.pitch = 1
+        confirm.volume = 1
+        window.speechSynthesis.speak(confirm)
+        // Run a quick health check to detect blocked output.
+        runAudioHealthCheck()
+      } catch {
+        // Ignore unlock failures.
+      }
+    })()
   }, [resetSpeechEngine, runAudioHealthCheck])
 
   useEffect(() => {
@@ -155,16 +238,32 @@ export const useBingoCaller = (): BingoCallerState => {
   useEffect(() => {
     if (typeof window === 'undefined') return
     const handleUserClick = () => {
-      if (audioBlockedMessage) {
+      if (audioBlockedMessage || !audioUnlocked) {
         // User gesture retry: attempt to resume speech safely.
-        runAudioHealthCheck()
+        void (async () => {
+          const unlocked = await unlockAudioFromUserGesture()
+          setAudioUnlocked(unlocked)
+          if (unlocked) {
+            runAudioHealthCheck()
+          }
+        })()
       }
     }
     window.addEventListener('click', handleUserClick)
+    window.addEventListener('touchstart', handleUserClick)
     return () => {
       window.removeEventListener('click', handleUserClick)
+      window.removeEventListener('touchstart', handleUserClick)
     }
-  }, [audioBlockedMessage, runAudioHealthCheck])
+  }, [audioBlockedMessage, audioUnlocked, runAudioHealthCheck])
+
+  useEffect(() => {
+    if (!audioUnlocked) return
+    if (!pendingSpeechRef.current) return
+    const pending = pendingSpeechRef.current
+    pendingSpeechRef.current = null
+    void speakAnnouncement(pending.number, pending.text, pending.voiceMode)
+  }, [audioUnlocked, speakAnnouncement])
 
   useEffect(() => {
     if (!initializedRef.current) {
@@ -203,40 +302,15 @@ export const useBingoCaller = (): BingoCallerState => {
     setAnnouncementNumber(calledNumber)
 
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        // Always reset before speaking to avoid stale audio engine state.
-        resetSpeechEngine()
-        let speechText = text
-        let rate = 0.95
-        let pitch = 1
-
-        if (voiceMode === 'FUNNY') {
-          speechText = getFunnyBingoSpeechText(calledNumber) || text
-          const style = getFunnyVoiceStyle(calledNumber)
-          rate = style.rate
-          pitch = style.pitch
-        } else if (voiceMode === 'CRAZY') {
-          speechText = `Boom boom bingo! ${text}. Repeat! ${text}.`
-          rate = 1.12 + (calledNumber % 3) * 0.08
-          pitch = 1.35 + (calledNumber % 4) * 0.1
-        }
-
-        const utterance = new SpeechSynthesisUtterance(speechText || text)
-        const voices = window.speechSynthesis.getVoices()
-        const preferredVoice =
-          voices.find((voice) =>
-            /(fred|samantha|zira|david|daniel|karen|google uk english male)/i.test(voice.name),
-          ) || voices[calledNumber % Math.max(1, voices.length)]
-        if (preferredVoice) {
-          utterance.voice = preferredVoice
-        }
-        utterance.rate = Math.min(1.4, rate)
-        utterance.pitch = Math.min(1.8, pitch)
-        utterance.volume = 1
-        window.speechSynthesis.speak(utterance)
-        setIsAudioReady(true)
-      } catch {
-        // Keep UI announcement even when speech API is blocked.
+      if (!audioUnlocked) {
+        pendingSpeechRef.current = { number: calledNumber, text, voiceMode }
+      } else {
+        void (async () => {
+          const played = await speakAnnouncement(calledNumber, text, voiceMode)
+          if (!played && !isAudioUnlocked()) {
+            pendingSpeechRef.current = { number: calledNumber, text, voiceMode }
+          }
+        })()
       }
     }
 
@@ -248,7 +322,7 @@ export const useBingoCaller = (): BingoCallerState => {
       setAnnouncement('')
       setAnnouncementNumber(null)
     }, 3000)
-  }, [calledNumbers, status, voiceMode])
+  }, [audioUnlocked, calledNumbers, speakAnnouncement, status, voiceMode])
 
   useEffect(() => {
     return () => {
@@ -265,6 +339,7 @@ export const useBingoCaller = (): BingoCallerState => {
     () => ({
       announcement,
       number: announcementNumber,
+      audioUnlocked,
       isAudioReady,
       isSpeechSupported,
       audioBlockedMessage,
@@ -273,6 +348,7 @@ export const useBingoCaller = (): BingoCallerState => {
     [
       announcement,
       announcementNumber,
+      audioUnlocked,
       isAudioReady,
       isSpeechSupported,
       audioBlockedMessage,

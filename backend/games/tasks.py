@@ -7,7 +7,6 @@ from asgiref.sync import async_to_sync
 from celery import shared_task
 from channels.layers import get_channel_layer
 from django.db import transaction
-from django.utils import timezone
 
 from claims.utils.evaluator import evaluate_claims_for_game
 from games.models import Game
@@ -49,8 +48,7 @@ def auto_call_numbers(game_id):
 
             if called_count >= 90:
                 current_game.status = Game.Status.FINISHED
-                current_game.ended_at = timezone.now()
-                current_game.save(update_fields=["status", "ended_at"])
+                current_game.save(update_fields=["status"])
                 transitioned_to_finished = True
 
         if transitioned_to_finished:
@@ -58,6 +56,7 @@ def auto_call_numbers(game_id):
                 f"game_{str(game_id)}",
                 {
                     "type": "game_finished",
+                    "status": "ENDED",
                 },
             )
             return True

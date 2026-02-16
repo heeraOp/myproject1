@@ -68,11 +68,15 @@ class GameConsumer(AsyncWebsocketConsumer):
         )
 
     async def game_finished(self, event):
+        payload = {
+            "type": "game.finished",
+        }
+        status = event.get("status")
+        if isinstance(status, str) and status:
+            payload["status"] = status
         await self.send(
             text_data=json.dumps(
-                {
-                    "type": "game.finished",
-                }
+                payload
             )
         )
 

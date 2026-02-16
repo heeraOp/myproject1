@@ -1,10 +1,9 @@
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from django.utils.decorators import method_decorator
 from django.utils import timezone
-from django.views.decorators.csrf import csrf_exempt
 from rest_framework import serializers
 from rest_framework.authentication import SessionAuthentication
+from rest_framework.exceptions import NotAuthenticated, PermissionDenied
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from asgiref.sync import async_to_sync
@@ -38,16 +37,12 @@ class IsAdminRole(BasePermission):
     """
 
     def has_permission(self, request, view):
-        return _is_admin_user(request.user)
-
-
-class CsrfExemptSessionAuthentication(SessionAuthentication):
-    """
-    Session auth without CSRF enforcement (for API clients like Postman).
-    """
-
-    def enforce_csrf(self, request):
-        return
+        user = request.user
+        if not user or not user.is_authenticated:
+            raise NotAuthenticated("Authentication credentials were not provided.")
+        if _is_admin_user(user):
+            return True
+        raise PermissionDenied("You do not have permission to perform this action.")
 
 
 def _configured_status():
@@ -76,14 +71,14 @@ def _mark_game_finished_if_numbers_exhausted(game):
             return False
 
         locked_game.status = Game.Status.FINISHED
-        locked_game.ended_at = timezone.now()
-        locked_game.save(update_fields=["status", "ended_at"])
+        locked_game.save(update_fields=["status"])
 
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         f"game_{str(game.id)}",
         {
             "type": "game_finished",
+            "status": "ENDED",
         },
     )
     return True
@@ -183,14 +178,13 @@ class AdminGameCreateSerializer(serializers.Serializer):
         return agent
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminResetCallView(APIView):
     """
     Admin-only endpoint to clear called numbers and claim progress.
     """
 
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def post(self, request, game_id):
         with transaction.atomic():
@@ -212,14 +206,13 @@ class AdminResetCallView(APIView):
         return Response({"detail": "Call history reset.", "cleared_called_numbers": deleted_called})
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminResetTicketView(APIView):
     """
     Admin-only endpoint to clear ticket assignments.
     """
 
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def post(self, request, game_id):
         with transaction.atomic():
@@ -243,14 +236,13 @@ class AdminResetTicketView(APIView):
         return Response({"detail": "Tickets reset.", "updated_tickets": updated})
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminResetAgentView(APIView):
     """
     Admin-only endpoint to clear agent/player assignments from tickets.
     """
 
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def post(self, request, game_id):
         with transaction.atomic():
@@ -273,14 +265,13 @@ class AdminResetAgentView(APIView):
         return Response({"detail": "Agent assignments reset.", "updated_tickets": updated})
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminStartGameView(APIView):
     """
     Admin-only endpoint to start a game.
     """
 
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def post(self, request, game_id):
         with transaction.atomic():
@@ -327,14 +318,13 @@ class AdminStartGameView(APIView):
         return Response({"detail": "Game started."})
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminPauseGameView(APIView):
     """
     Admin-only endpoint to pause a game.
     """
 
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def post(self, request, game_id):
         with transaction.atomic():
@@ -351,14 +341,13 @@ class AdminPauseGameView(APIView):
             return Response({"detail": "Game paused."})
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminResumeGameView(APIView):
     """
     Admin-only endpoint to resume a paused game.
     """
 
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def post(self, request, game_id):
         with transaction.atomic():
@@ -383,14 +372,13 @@ class AdminResumeGameView(APIView):
         return Response({"detail": "Game resumed."})
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminGameThemeView(APIView):
     """
     Admin-only endpoint to set the active theme for a game.
     """
 
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def post(self, request, game_id):
         game = get_object_or_404(Game, id=game_id)
@@ -404,14 +392,13 @@ class AdminGameThemeView(APIView):
         return Response({"active_theme": game.active_theme})
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminCallNextNumberView(APIView):
     """
     Admin-only endpoint to call the next random number for a game.
     """
 
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def post(self, request, game_id):
         game = get_object_or_404(Game, id=game_id)
@@ -448,7 +435,6 @@ class AdminCallNextNumberView(APIView):
         return Response({"number": number})
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminGameAnnouncementView(APIView):
     """
     Admin-only endpoint to broadcast announcements to all connected players.
@@ -456,7 +442,7 @@ class AdminGameAnnouncementView(APIView):
     """
 
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def post(self, request, game_id):
         game = get_object_or_404(Game, id=game_id)
@@ -493,14 +479,13 @@ class AdminGameAnnouncementView(APIView):
         return Response(payload, status=201)
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminGameListCreateView(APIView):
     """
     Admin-only endpoint to create and list games.
     """
 
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def get(self, request):
         games = Game.objects.all().order_by("-game_datetime", "id")
@@ -603,14 +588,13 @@ class AdminGameListCreateView(APIView):
         return Response(game_payload, status=201)
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class CurrentAdminGameView(APIView):
     """
     Admin-only endpoint to fetch the single active game.
     """
 
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def get(self, request):
         game = Game.objects.filter(is_active=True).first()
@@ -619,14 +603,13 @@ class CurrentAdminGameView(APIView):
         return Response(_admin_game_payload(game))
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AdminAgentListView(APIView):
     """
     Admin-only endpoint to list active agents for game assignment.
     """
 
     permission_classes = [IsAdminRole]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
 
     def get(self, request):
         agents = Agent.objects.filter(is_active=True).order_by("name", "id")

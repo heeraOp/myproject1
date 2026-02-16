@@ -17,6 +17,29 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _env_bool(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _split_csv(value):
+    if not value:
+        return []
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def _normalize_samesite(value, default="Lax"):
+    lookup = {
+        "lax": "Lax",
+        "strict": "Strict",
+        "none": "None",
+    }
+    normalized = str(value).strip().lower() if value is not None else ""
+    return lookup.get(normalized, default)
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
@@ -24,9 +47,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-!d_)9hl3n265h1okrfni5+o)v3%c2(xkzxchntt87w+9cdqp28'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = _env_bool("DJANGO_DEBUG", True)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = _split_csv(os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1"))
 
 
 # Application definition
@@ -144,15 +167,36 @@ SUPPORT_WHATSAPP_NUMBER = os.environ.get("SUPPORT_WHATSAPP_NUMBER", "")
 STATIC_URL = 'static/'
 
 # CORS/CSRF for local frontend dev (Vite).
-CORS_ALLOWED_ORIGINS = [
+default_frontend_origins = [
     'http://localhost:5173',
     'http://127.0.0.1:5173',
 ]
+CORS_ALLOWED_ORIGINS = _split_csv(
+    os.environ.get("DJANGO_CORS_ALLOWED_ORIGINS", ",".join(default_frontend_origins))
+) or default_frontend_origins
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-]
+CSRF_TRUSTED_ORIGINS = _split_csv(
+    os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", ",".join(CORS_ALLOWED_ORIGINS))
+) or CORS_ALLOWED_ORIGINS
+
+SESSION_COOKIE_SECURE = _env_bool("DJANGO_SESSION_COOKIE_SECURE", not DEBUG)
+CSRF_COOKIE_SECURE = _env_bool("DJANGO_CSRF_COOKIE_SECURE", not DEBUG)
+SESSION_COOKIE_SAMESITE = _normalize_samesite(
+    os.environ.get("DJANGO_SESSION_COOKIE_SAMESITE"),
+    "Lax",
+)
+CSRF_COOKIE_SAMESITE = _normalize_samesite(
+    os.environ.get("DJANGO_CSRF_COOKIE_SAMESITE"),
+    "Lax",
+)
+SESSION_COOKIE_HTTPONLY = _env_bool("DJANGO_SESSION_COOKIE_HTTPONLY", True)
+CSRF_COOKIE_HTTPONLY = _env_bool("DJANGO_CSRF_COOKIE_HTTPONLY", False)
+
+# Browsers reject SameSite=None cookies unless Secure is enabled.
+if SESSION_COOKIE_SAMESITE == "None":
+    SESSION_COOKIE_SECURE = True
+if CSRF_COOKIE_SAMESITE == "None":
+    CSRF_COOKIE_SECURE = True
 
 # Celery configuration (Redis broker + django-celery-results backend).
 CELERY_BROKER_URL = 'redis://localhost:6379/0'

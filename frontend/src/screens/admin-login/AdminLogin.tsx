@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { fetchCurrentUser } from '@/api/rest/auth'
 import { adminApiClient } from '@/api/rest/client'
 import './AdminLogin.css'
-
-const ADMIN_LOGGED_IN_KEY = 'adminLoggedIn'
 
 const AdminLogin = () => {
   const navigate = useNavigate()
@@ -17,7 +16,7 @@ const AdminLogin = () => {
     try {
       await adminApiClient.get('/users/csrf/')
     } catch {
-      // Ignore CSRF bootstrap failures; login endpoint is CSRF-exempt.
+      // Ignore CSRF bootstrap failures and let backend validation respond.
     }
   }
 
@@ -31,7 +30,11 @@ const AdminLogin = () => {
       const response = await adminApiClient.post('/users/login/', { username, password })
 
       if (response?.data?.success) {
-        localStorage.setItem(ADMIN_LOGGED_IN_KEY, 'true')
+        const currentUser = await fetchCurrentUser()
+        if (!currentUser.is_admin) {
+          setError('You are logged in but do not have admin access.')
+          return
+        }
         navigate('/admin', { replace: true })
       } else {
         setError('Invalid credentials')
