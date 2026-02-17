@@ -143,7 +143,7 @@ export const useGameSocket = (gameId?: string): void => {
     const resolvedTicketNumber =
       ticketMatch && Number.isInteger(ticketMatch.ticket_number) ? ticketMatch.ticket_number : null
 
-    if (winnerId !== null && resolvedTicketNumber !== null) {
+    if (winnerId !== null && resolvedTicketNumber !== null && resolvedTicketNumber !== undefined) {
       applyBackendEvent({
         type: 'winner.announced',
         winner: {
@@ -161,7 +161,7 @@ export const useGameSocket = (gameId?: string): void => {
       id: `winner-${String(event.id)}`,
       winner_name: event.winnerName.trim() || 'Player',
       prize_name: event.prizeName.trim() || 'Prize',
-      ticket_number: resolvedTicketNumber,
+      ticket_number: resolvedTicketNumber ?? null,
     })
   }
 

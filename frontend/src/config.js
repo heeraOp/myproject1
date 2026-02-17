@@ -1,20 +1,16 @@
-const normalize = (value, fallback) => {
-  const output = (value || fallback || '').trim()
+const normalize = (value = '') => {
+  const output = value.trim()
   return output.endsWith('/') ? output.slice(0, -1) : output
 }
 
-const defaultHost =
-  typeof window !== 'undefined' ? window.location.hostname : 'localhost'
-const defaultHttpProtocol =
-  typeof window !== 'undefined' ? window.location.protocol : 'http:'
-const defaultWsProtocol =
-  defaultHttpProtocol === 'https:' ? 'wss:' : 'ws:'
+const isBrowser = typeof window !== 'undefined'
+const hostname = isBrowser ? window.location.hostname : ''
+const host = isBrowser ? window.location.host : ''
+const isLocalDev = hostname === 'localhost'
+const wsProtocol = isBrowser && window.location.protocol === 'https:' ? 'wss' : 'ws'
 
-export const REST_BASE_URL = normalize(
-  import.meta.env.VITE_API_BASE_URL,
-  `${defaultHttpProtocol}//${defaultHost}:8000`,
-)
-export const WS_BASE_URL = normalize(
-  import.meta.env.VITE_WS_BASE_URL,
-  `${defaultWsProtocol}//${defaultHost}:8000`,
-)
+const defaultRestBase = isLocalDev ? 'http://localhost:8000' : ''
+const defaultWsBase = isLocalDev ? 'ws://localhost:8000' : host ? `${wsProtocol}://${host}` : ''
+
+export const REST_BASE_URL = normalize(import.meta.env.VITE_API_BASE_URL || defaultRestBase)
+export const WS_BASE_URL = normalize(import.meta.env.VITE_WS_BASE_URL || defaultWsBase)

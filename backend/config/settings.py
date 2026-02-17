@@ -47,6 +47,13 @@ def _normalize_samesite(value, default="Lax"):
     return lookup.get(normalized, default)
 
 
+def _required_env(name):
+    value = str(os.environ.get(name, "")).strip()
+    if DJANGO_ENV == "production" and not value:
+        raise ImproperlyConfigured(f"{name} is required for production.")
+    return value
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
@@ -59,8 +66,15 @@ if not SECRET_KEY:
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = _env_bool("DJANGO_DEBUG", DJANGO_ENV != "production")
+if DJANGO_ENV == "production" and DEBUG:
+    raise ImproperlyConfigured("DJANGO_DEBUG must be False in production.")
 
-ALLOWED_HOSTS = _split_csv(os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1"))
+if DJANGO_ENV == "production":
+    ALLOWED_HOSTS = _split_csv(os.environ.get("DJANGO_ALLOWED_HOSTS", ""))
+    if not ALLOWED_HOSTS:
+        raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS is required for production.")
+else:
+    ALLOWED_HOSTS = _split_csv(os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1"))
 
 
 # Application definition
@@ -82,6 +96,17 @@ INSTALLED_APPS = [
     'claims',
     'common',
 ]
+
+# SessionAuthentication performs CSRF checks for unsafe methods.
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    # Keep view-level permission classes as the source of truth.
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.AllowAny",
+    ],
+}
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -133,10 +158,10 @@ if DJANGO_ENV == "production":
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ.get("POSTGRES_DB"),
-            "USER": os.environ.get("POSTGRES_USER"),
-            "PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
-            "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
+            "NAME": _required_env("POSTGRES_DB"),
+            "USER": _required_env("POSTGRES_USER"),
+            "PASSWORD": _required_env("POSTGRES_PASSWORD"),
+            "HOST": _required_env("POSTGRES_HOST"),
             "PORT": os.environ.get("POSTGRES_PORT", "5432"),
         }
     }
@@ -201,9 +226,14 @@ default_frontend_origins = [
     'http://localhost:5173',
     'http://127.0.0.1:5173',
 ]
-CORS_ALLOWED_ORIGINS = _split_csv(
-    os.environ.get("DJANGO_CORS_ALLOWED_ORIGINS", ",".join(default_frontend_origins))
-) or default_frontend_origins
+if DJANGO_ENV == "production":
+    CORS_ALLOWED_ORIGINS = _split_csv(os.environ.get("DJANGO_CORS_ALLOWED_ORIGINS", ""))
+    if not CORS_ALLOWED_ORIGINS:
+        raise ImproperlyConfigured("DJANGO_CORS_ALLOWED_ORIGINS is required for production.")
+else:
+    CORS_ALLOWED_ORIGINS = _split_csv(
+        os.environ.get("DJANGO_CORS_ALLOWED_ORIGINS", ",".join(default_frontend_origins))
+    ) or default_frontend_origins
 CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = _split_csv(
     os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", ",".join(CORS_ALLOWED_ORIGINS))
@@ -221,6 +251,11 @@ CSRF_COOKIE_SAMESITE = _normalize_samesite(
 )
 SESSION_COOKIE_HTTPONLY = _env_bool("DJANGO_SESSION_COOKIE_HTTPONLY", True)
 CSRF_COOKIE_HTTPONLY = _env_bool("DJANGO_CSRF_COOKIE_HTTPONLY", False)
+
+# Production always requires secure cookies for session-based authentication over HTTPS.
+if DJANGO_ENV == "production":
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 # Browsers reject SameSite=None cookies unless Secure is enabled.
 if SESSION_COOKIE_SAMESITE == "None":
@@ -253,4 +288,3 @@ else:
 # Celery configuration (Redis broker + django-celery-results backend).
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = 'django-db'
-

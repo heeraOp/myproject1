@@ -1,16 +1,18 @@
+import logging
+
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.authentication import SessionAuthentication
-from rest_framework.exceptions import NotAuthenticated, PermissionDenied
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.db import transaction
 from rest_framework.views import APIView
 
+from common.permissions import IsAdminRole, is_admin_user
 from .models import Agent, Game, Announcement
 from .serializers import AnnouncementCreateSerializer
 from .utils.calling import call_next_number
@@ -23,26 +25,7 @@ from tickets.serializers import PlayerTicketSerializer, PublicTicketSerializer
 from tickets.utils.generator import generate_housie_ticket
 
 
-def _is_admin_user(user):
-    if not user or not user.is_authenticated:
-        return False
-    if getattr(user, "role", None) == "ADMIN":
-        return True
-    return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
-
-
-class IsAdminRole(BasePermission):
-    """
-    Admin-only permission based on user role or staff/superuser flags.
-    """
-
-    def has_permission(self, request, view):
-        user = request.user
-        if not user or not user.is_authenticated:
-            raise NotAuthenticated("Authentication credentials were not provided.")
-        if _is_admin_user(user):
-            return True
-        raise PermissionDenied("You do not have permission to perform this action.")
+logger = logging.getLogger(__name__)
 
 
 def _configured_status():
@@ -550,10 +533,8 @@ class AdminGameListCreateView(APIView):
                 generated_count = len(tickets)
 
         game_payload = _admin_game_payload(game)
-        print("Game created:", str(game.id))
         channel_layer = get_channel_layer()
         try:
-            print("Group broadcast:", "global_lobby")
             async_to_sync(channel_layer.group_send)(
                 "global_lobby",
                 {
@@ -565,13 +546,11 @@ class AdminGameListCreateView(APIView):
                 },
             )
         except Exception as exc:
-            print("Group broadcast failed (new_game_created):", str(exc))
+            logger.warning("Group broadcast failed (new_game_created): %s", str(exc))
 
         if generated_count > 0:
             try:
                 group_name = f"game_{str(game.id)}"
-                print("Ticket generated:", generated_count, "for game:", str(game.id))
-                print("Group broadcast:", group_name)
                 async_to_sync(channel_layer.group_send)(
                     group_name,
                     {
@@ -583,7 +562,7 @@ class AdminGameListCreateView(APIView):
                     },
                 )
             except Exception as exc:
-                print("Group broadcast failed (tickets_generated):", str(exc))
+                logger.warning("Group broadcast failed (tickets_generated): %s", str(exc))
 
         return Response(game_payload, status=201)
 
@@ -646,6 +625,7 @@ class PublicGameSerializer(serializers.Serializer):
 
 class PublicGameListView(APIView):
     authentication_classes = []
+    permission_classes = [AllowAny]
 
     def get(self, request):
         games = Game.objects.filter(
@@ -658,6 +638,7 @@ class PublicGameListView(APIView):
 
 class LatestPublicGameView(APIView):
     authentication_classes = []
+    permission_classes = [AllowAny]
 
     def get(self, request):
         # Backward-compatible alias that now returns the active game.
@@ -670,6 +651,7 @@ class LatestPublicGameView(APIView):
 
 class CurrentPublicGameView(APIView):
     authentication_classes = []
+    permission_classes = [AllowAny]
 
     def get(self, request):
         game = Game.objects.filter(is_active=True).first()
@@ -681,6 +663,7 @@ class CurrentPublicGameView(APIView):
 
 class PublicSupportSettingsView(APIView):
     authentication_classes = []
+    permission_classes = [AllowAny]
 
     def get(self, request):
         return Response(
@@ -695,6 +678,7 @@ class PublicSupportSettingsView(APIView):
 
 class GameStateView(APIView):
     authentication_classes = []
+    permission_classes = [AllowAny]
 
     def get(self, request, game_id):
         game = get_object_or_404(Game, id=game_id)
@@ -738,6 +722,7 @@ class GameStateView(APIView):
 
 class GameTicketsView(APIView):
     authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
 
     def get(self, request, game_id):
         game = get_object_or_404(Game, id=game_id)
@@ -755,7 +740,7 @@ class GameTicketsView(APIView):
         viewer_phone = request.query_params.get("player_phone")
         serializer_context = _ticket_snapshot_context(game, viewer_phone=viewer_phone)
 
-        if _is_admin_user(request.user):
+        if is_admin_user(request.user):
             serializer = PlayerTicketSerializer(
                 tickets,
                 many=True,
@@ -784,6 +769,7 @@ class GameTicketsView(APIView):
 
 class GameBusinessSummaryView(APIView):
     authentication_classes = []
+    permission_classes = [AllowAny]
 
     def get(self, request, game_id):
         game = get_object_or_404(Game, id=game_id)
@@ -824,12 +810,10 @@ class GameBusinessSummaryView(APIView):
 
 class GameSummaryView(APIView):
     authentication_classes = []
+    permission_classes = [AllowAny]
 
     def get(self, request, game_id):
         game = get_object_or_404(Game, id=game_id)
-        print("SUMMARY CALLED")
-        print("Summary game id:", game.id)
-
         game_payload = {
             "id": str(game.id),
             "name": game.name,
@@ -860,8 +844,6 @@ class GameSummaryView(APIView):
             .select_related("prize", "ticket")
             .order_by("created_at", "id")
         )
-        print("Winners count in summary:", winners.count())
-        print("Winner IDs returned:", list(winners.values_list("id", flat=True)))
         winners_payload = WinnerSerializer(winners, many=True).data
 
         called_numbers = list(game.called_numbers.values_list("number", flat=True))
