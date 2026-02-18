@@ -16,11 +16,46 @@ export const fetchGameTickets = async (
   gameId: string,
   playerPhone?: string,
 ): Promise<PlayerTicket[]> => {
-  // Use the canonical game tickets snapshot endpoint used by admin as well.
-  const response = await apiClient.get<GameTicketsSnapshotResponse>(`/games/${gameId}/tickets/`, {
-    params: playerPhone ? { player_phone: playerPhone } : undefined,
-  })
-  return Array.isArray(response.data?.tickets) ? response.data.tickets : []
+  const params = playerPhone ? { player_phone: playerPhone } : undefined
+
+  // Canonical endpoint shape: { tickets: [...] }
+  try {
+    const response = await apiClient.get<GameTicketsSnapshotResponse | PlayerTicket[]>(
+      `/games/${gameId}/tickets/`,
+      { params },
+    )
+
+    if (Array.isArray(response.data)) return response.data
+    if (Array.isArray(response.data?.tickets)) return response.data.tickets
+  } catch {
+    // Fallback below for deployments still serving legacy ticket routes.
+  }
+
+  // Legacy public endpoint shape: [...]
+  try {
+    const publicResponse = await apiClient.get<PlayerTicket[] | { tickets?: PlayerTicket[] }>(
+      `/tickets/game/${gameId}/public/`,
+      { params },
+    )
+    if (Array.isArray(publicResponse.data)) return publicResponse.data
+    if (Array.isArray(publicResponse.data?.tickets)) return publicResponse.data.tickets
+  } catch {
+    // Continue to final fallback.
+  }
+
+  // Legacy player endpoint shape: [...]
+  try {
+    const playerResponse = await apiClient.get<PlayerTicket[] | { tickets?: PlayerTicket[] }>(
+      `/tickets/game/${gameId}/`,
+      { params },
+    )
+    if (Array.isArray(playerResponse.data)) return playerResponse.data
+    if (Array.isArray(playerResponse.data?.tickets)) return playerResponse.data.tickets
+  } catch {
+    return []
+  }
+
+  return []
 }
 
 export type RequestBookingPayload = {

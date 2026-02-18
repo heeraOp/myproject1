@@ -1,6 +1,7 @@
 import logging
 
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers
@@ -16,6 +17,7 @@ from common.permissions import IsAdminRole, is_admin_user
 from .models import Agent, Game, Announcement
 from .serializers import AnnouncementCreateSerializer
 from .utils.calling import call_next_number
+from .utils.leaderboard import build_live_leaderboard
 from .tasks import auto_call_numbers
 from claims.models import Claim, Winner, Prize
 from claims.utils.evaluator import evaluate_claims_for_game
@@ -117,11 +119,32 @@ def _admin_game_payload(game):
     }
 
 
+def _broadcast_game_update(game, changed_fields):
+    if not isinstance(changed_fields, dict) or not changed_fields:
+        return
+
+    channel_layer = get_channel_layer()
+    try:
+        async_to_sync(channel_layer.group_send)(
+            f"game_{str(game.id)}",
+            {
+                "type": "game_update",
+                "data": {
+                    "game_id": str(game.id),
+                    "changed_fields": changed_fields,
+                },
+            },
+        )
+    except Exception as exc:
+        logger.warning("Group broadcast failed (game_update): %s", str(exc))
+
+
 class AdminGameCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255, trim_whitespace=True)
     date = serializers.DateTimeField(default_timezone=timezone.get_default_timezone())
     ticket_price = serializers.IntegerField(min_value=1)
     total_tickets = serializers.IntegerField(min_value=1)
+    calling_interval = serializers.IntegerField(min_value=1, required=False)
     agent_commission = serializers.IntegerField(min_value=0, required=False, default=0)
     agent_id = serializers.IntegerField(required=False, allow_null=True)
     booking_status = serializers.ChoiceField(
@@ -298,6 +321,13 @@ class AdminStartGameView(APIView):
                 "calling_interval": game.calling_interval,
             },
         )
+        _broadcast_game_update(
+            game,
+            {
+                "status": game.status,
+                "calling_interval": game.calling_interval,
+            },
+        )
         return Response({"detail": "Game started."})
 
 
@@ -321,7 +351,14 @@ class AdminPauseGameView(APIView):
 
             game.status = Game.Status.PAUSED
             game.save(update_fields=["status"])
-            return Response({"detail": "Game paused."})
+
+        _broadcast_game_update(
+            game,
+            {
+                "status": game.status,
+            },
+        )
+        return Response({"detail": "Game paused."})
 
 
 class AdminResumeGameView(APIView):
@@ -352,6 +389,13 @@ class AdminResumeGameView(APIView):
             game.save(update_fields=["status"])
 
         auto_call_numbers.delay(game.id)
+        _broadcast_game_update(
+            game,
+            {
+                "status": game.status,
+                "calling_interval": game.calling_interval,
+            },
+        )
         return Response({"detail": "Game resumed."})
 
 
@@ -407,6 +451,15 @@ class AdminCallNextNumberView(APIView):
                 "type": "number_called",
                 "number": number,
                 "called_numbers": called_numbers,
+            },
+        )
+
+        leaderboard_data = build_live_leaderboard(game, called_numbers)
+        async_to_sync(channel_layer.group_send)(
+            f"game_{str(game.id)}",
+            {
+                "type": "leaderboard_update",
+                "data": leaderboard_data,
             },
         )
 
@@ -476,6 +529,9 @@ class AdminGameListCreateView(APIView):
 
     def post(self, request):
         payload = request.data.copy()
+        target_game_id = str(payload.get("game_id", "")).strip()
+        if "game_id" in payload:
+            payload.pop("game_id")
         if not payload.get("date") and payload.get("game_datetime"):
             payload["date"] = payload.get("game_datetime")
 
@@ -490,12 +546,87 @@ class AdminGameListCreateView(APIView):
         game_datetime = validated["date"]
         ticket_price = validated["ticket_price"]
         total_tickets = validated["total_tickets"]
+        calling_interval = validated.get("calling_interval")
         agent_commission = validated["agent_commission"]
         agent = validated.get("agent_id")
         booking_status = validated["booking_status"]
         website_status = validated["website_status"]
         active_theme = validated["active_theme"]
         generated_count = 0
+
+        if target_game_id:
+            with transaction.atomic():
+                game = get_object_or_404(Game.objects.select_for_update(), id=target_game_id)
+                changed_fields = {}
+                update_fields = []
+
+                if game.name != name:
+                    game.name = name
+                    update_fields.append("name")
+                    changed_fields["name"] = game.name
+
+                if game.game_datetime != game_datetime:
+                    game.game_datetime = game_datetime
+                    update_fields.append("game_datetime")
+                    changed_fields["date"] = timezone.localtime(game.game_datetime).isoformat()
+
+                if game.ticket_price != ticket_price:
+                    game.ticket_price = ticket_price
+                    update_fields.append("ticket_price")
+                    changed_fields["ticket_price"] = game.ticket_price
+
+                if game.total_ticket_limit != total_tickets:
+                    game.total_ticket_limit = total_tickets
+                    update_fields.append("total_ticket_limit")
+                    changed_fields["total_tickets"] = game.total_ticket_limit
+
+                if calling_interval is not None and game.calling_interval != calling_interval:
+                    game.calling_interval = calling_interval
+                    update_fields.append("calling_interval")
+                    changed_fields["calling_interval"] = game.calling_interval
+
+                if game.agent_commission != agent_commission:
+                    game.agent_commission = agent_commission
+                    update_fields.append("agent_commission")
+                    changed_fields["agent_commission"] = game.agent_commission
+
+                if game.booking_status != booking_status:
+                    game.booking_status = booking_status
+                    update_fields.append("booking_status")
+                    changed_fields["booking_status"] = game.booking_status
+
+                if game.website_status != website_status:
+                    game.website_status = website_status
+                    update_fields.append("website_status")
+                    changed_fields["website_status"] = game.website_status
+
+                next_agent_id = agent.id if agent else None
+                if game.agent_id != next_agent_id:
+                    game.agent = agent
+                    update_fields.append("agent")
+                    changed_fields["agent"] = _agent_payload(game.agent)
+
+                if update_fields:
+                    game.save(update_fields=update_fields)
+
+            game_payload = _admin_game_payload(game)
+            if changed_fields:
+                channel_layer = get_channel_layer()
+                try:
+                    async_to_sync(channel_layer.group_send)(
+                        f"game_{str(game.id)}",
+                        {
+                            "type": "game_update",
+                            "data": {
+                                "game_id": str(game.id),
+                                "changed_fields": changed_fields,
+                            },
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning("Group broadcast failed (game_update): %s", str(exc))
+
+            return Response(game_payload)
 
         with transaction.atomic():
             Game.objects.filter(is_active=True).update(is_active=False)
@@ -510,6 +641,7 @@ class AdminGameListCreateView(APIView):
                 agent_commission=agent_commission,
                 agent=agent,
                 total_ticket_limit=total_tickets,
+                calling_interval=calling_interval if calling_interval is not None else 10,
                 active_theme=active_theme,
                 is_active=True,
                 created_by=request.user,
@@ -590,6 +722,25 @@ class AdminAgentListView(APIView):
     permission_classes = [IsAdminRole]
     authentication_classes = [SessionAuthentication]
 
+    def _broadcast_agent_update(self, agent):
+        changed_fields = {"agent": _agent_payload(agent)}
+        channel_layer = get_channel_layer()
+        target_games = Game.objects.filter(agent=agent, is_active=True).only("id")
+        for game in target_games:
+            try:
+                async_to_sync(channel_layer.group_send)(
+                    f"game_{str(game.id)}",
+                    {
+                        "type": "game_update",
+                        "data": {
+                            "game_id": str(game.id),
+                            "changed_fields": changed_fields,
+                        },
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Group broadcast failed (agent_update): %s", str(exc))
+
     def get(self, request):
         agents = Agent.objects.filter(is_active=True).order_by("name", "id")
         return Response(
@@ -601,6 +752,78 @@ class AdminAgentListView(APIView):
                 }
                 for agent in agents
             ]
+        )
+
+    def post(self, request):
+        name = str(request.data.get("name", "")).strip()
+        whatsapp_number = str(request.data.get("whatsapp_number", "")).strip()
+
+        if not name:
+            return Response({"detail": "Agent name is required."}, status=400)
+        if not whatsapp_number:
+            return Response({"detail": "WhatsApp number is required."}, status=400)
+
+        agent = Agent(name=name, whatsapp_number=whatsapp_number, is_active=True)
+        try:
+            agent.full_clean()
+        except DjangoValidationError as exc:
+            message = "; ".join(str(item) for values in exc.message_dict.values() for item in values)
+            return Response({"detail": message or "Invalid agent details."}, status=400)
+
+        agent.save()
+        return Response(
+            {
+                "id": agent.id,
+                "name": agent.name,
+                "whatsapp_number": agent.whatsapp_number,
+            },
+            status=201,
+        )
+
+    def put(self, request):
+        raw_agent_id = request.data.get("id")
+        if raw_agent_id in (None, ""):
+            return Response({"detail": "Agent id is required."}, status=400)
+
+        try:
+            agent_id = int(raw_agent_id)
+        except (TypeError, ValueError):
+            return Response({"detail": "Agent id must be an integer."}, status=400)
+
+        agent = get_object_or_404(Agent, id=agent_id, is_active=True)
+
+        next_name = str(request.data.get("name", agent.name)).strip()
+        next_whatsapp_number = str(request.data.get("whatsapp_number", agent.whatsapp_number)).strip()
+        if not next_name:
+            return Response({"detail": "Agent name is required."}, status=400)
+        if not next_whatsapp_number:
+            return Response({"detail": "WhatsApp number is required."}, status=400)
+
+        previous_name = agent.name
+        previous_whatsapp_number = agent.whatsapp_number
+        agent.name = next_name
+        agent.whatsapp_number = next_whatsapp_number
+        try:
+            agent.full_clean()
+        except DjangoValidationError as exc:
+            message = "; ".join(str(item) for values in exc.message_dict.values() for item in values)
+            return Response({"detail": message or "Invalid agent details."}, status=400)
+
+        update_fields = []
+        if previous_name != agent.name:
+            update_fields.append("name")
+        if previous_whatsapp_number != agent.whatsapp_number:
+            update_fields.append("whatsapp_number")
+        if update_fields:
+            agent.save(update_fields=update_fields)
+            self._broadcast_agent_update(agent)
+
+        return Response(
+            {
+                "id": agent.id,
+                "name": agent.name,
+                "whatsapp_number": agent.whatsapp_number,
+            }
         )
 
 

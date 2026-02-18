@@ -165,6 +165,23 @@ export const listAdminGames = async (): Promise<AdminGameListItem[]> => {
 export const fetchAgents = async (): Promise<AgentOption[]> =>
   (await adminApiClient.get<AgentOption[]>('/games/admin/agents/')).data
 
+export const createAgent = async (payload: {
+  name: string
+  whatsapp_number: string
+}): Promise<AgentOption> => {
+  const response = await adminApiClient.post<AgentOption>('/games/admin/agents/', payload)
+  return response.data
+}
+
+export const updateAgent = async (payload: {
+  id: number
+  name: string
+  whatsapp_number: string
+}): Promise<AgentOption> => {
+  const response = await adminApiClient.put<AgentOption>('/games/admin/agents/', payload)
+  return response.data
+}
+
 export const getCurrentAdminGame = async (): Promise<AdminGameListItem> => {
   const response = await adminApiClient.get<AdminGameListItem>('/games/current/')
   return response.data
@@ -300,6 +317,31 @@ export const rejectTicketRequest = async (ticketId: string) => {
   return response.data
 }
 
+export const bookTicketAsAdmin = async (payload: {
+  game_id: string
+  ticket_number?: number
+  ticket_numbers?: number[]
+  booking_mode?: 'RANDOM' | 'HALF_SHEET' | 'FULL_SHEET'
+  player_name: string
+  player_phone: string
+}): Promise<TicketResponse> => {
+  const response = await adminApiClient.post<TicketResponse>('/tickets/admin/book/', payload)
+  return response.data
+}
+
+export const updateAdminTicket = async (
+  ticketId: string,
+  payload: { player_name: string; player_phone: string },
+): Promise<TicketResponse> => {
+  const response = await adminApiClient.post<TicketResponse>(`/admin/tickets/${ticketId}/update/`, payload)
+  return response.data
+}
+
+export const releaseAdminTicket = async (ticketId: string): Promise<TicketResponse> => {
+  const response = await adminApiClient.post<TicketResponse>(`/admin/tickets/${ticketId}/release/`)
+  return response.data
+}
+
 export const generateTickets = async (payload: { game_id: string; total_tickets: number }) => {
   const response = await adminApiClient.post<{ total_generated: number }>(
     '/tickets/admin/generate/',
@@ -313,8 +355,10 @@ export const saveGameSettings = async (payload: {
   date: string
   total_tickets: number
   ticket_price: number
+  calling_interval?: number
   agent_commission: number
   agent_id?: number | null
+  game_id?: string
   booking_status: string
   website_status: string
 }) => {

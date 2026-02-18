@@ -11,6 +11,7 @@ from django.db import transaction
 from claims.utils.evaluator import evaluate_claims_for_game
 from games.models import Game
 from games.utils.calling import call_next_number
+from games.utils.leaderboard import build_live_leaderboard
 
 
 @shared_task
@@ -119,6 +120,15 @@ def auto_call_numbers(game_id):
                     "type": "number_called",
                     "number": number,
                     "called_numbers": called_numbers,
+                },
+            )
+
+            leaderboard_data = build_live_leaderboard(game, called_numbers)
+            async_to_sync(channel_layer.group_send)(
+                f"game_{str(game.id)}",
+                {
+                    "type": "leaderboard_update",
+                    "data": leaderboard_data,
                 },
             )
 

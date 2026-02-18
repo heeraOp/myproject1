@@ -31,14 +31,14 @@ const TambolaTicketCard = ({
   let statusLabel = 'AVAILABLE'
 
   if (variant === 'player') {
-    let displayName = 'AVAILABLE'
+    let displayName = bookingClosed && isAvailable ? 'ENDED' : 'AVAILABLE'
     if (isConfirmed && normalizedPlayerName) {
       displayName = normalizedPlayerName
     } else if (isPending && requestedByName) {
       displayName = requestedByName
     }
     ownerLabel = `${ticket.ticket_number}:(${displayName})`
-    statusLabel = isConfirmed ? 'Booked ✅' : isPending ? 'Pending ⏳' : 'AVAILABLE'
+    statusLabel = isConfirmed ? 'Booked ✅' : isPending ? 'Pending ⏳' : bookingClosed && isAvailable ? 'ENDED' : 'AVAILABLE'
   } else {
     const ownerName = isConfirmed ? (normalizedPlayerName || 'booked') : isPending ? 'pending' : 'available'
     ownerLabel = `${ticket.ticket_number}:(${ownerName})`

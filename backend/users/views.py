@@ -1,4 +1,4 @@
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import authenticate, login, logout
 from django.middleware.csrf import get_token
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.exceptions import NotAuthenticated
@@ -40,6 +40,14 @@ class LoginView(APIView):
             return Response({"success": False, "detail": "Invalid credentials"}, status=400)
 
         login(request, user)
+        return Response({"success": True})
+
+
+class LogoutView(APIView):
+    authentication_classes = [SessionAuthentication]
+
+    def post(self, request):
+        logout(request)
         return Response({"success": True})
 
 

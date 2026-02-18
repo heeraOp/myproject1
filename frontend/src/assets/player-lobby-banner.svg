@@ -1,0 +1,58 @@
+<svg width="1600" height="320" viewBox="0 0 1600 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1600" y2="320" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#06215A"/>
+      <stop offset="0.52" stop-color="#7A0F37"/>
+      <stop offset="1" stop-color="#03194C"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="130" y1="35" x2="280" y2="280" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFF2A6"/>
+      <stop offset="0.5" stop-color="#FFD056"/>
+      <stop offset="1" stop-color="#B16A10"/>
+    </linearGradient>
+    <radialGradient id="spark" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(290 90) rotate(90) scale(90 120)">
+      <stop stop-color="#FFD76A" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#FFD76A" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ribbonA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F2182E"/>
+      <stop offset="1" stop-color="#A0001C"/>
+    </linearGradient>
+    <linearGradient id="curveBlue" x1="90" y1="-30" x2="600" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3AA3FF"/>
+      <stop offset="1" stop-color="#1450C9"/>
+    </linearGradient>
+    <linearGradient id="curveRed" x1="560" y1="-30" x2="1400" y2="260" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF2D50"/>
+      <stop offset="1" stop-color="#D10124"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1600" height="320" fill="url(#bg)"/>
+
+  <path d="M-20 300C90 165 260 170 420 255C560 330 730 335 890 235C1060 130 1240 125 1420 195C1500 225 1565 245 1620 270V340H-20V300Z" fill="#051843" fill-opacity="0.58"/>
+  <path d="M-20 40C115 5 220 15 340 72C470 132 600 135 770 78C980 8 1180 18 1390 102C1490 142 1560 170 1620 197" stroke="url(#curveBlue)" stroke-width="36" stroke-linecap="round"/>
+  <path d="M180 -40C420 25 620 130 860 105C1080 82 1290 20 1620 -25" stroke="url(#curveRed)" stroke-width="44" stroke-linecap="round"/>
+  <path d="M90 275C280 155 420 155 650 255" stroke="#2564CF" stroke-opacity="0.9" stroke-width="18" stroke-linecap="round"/>
+  <path d="M1110 280C1260 165 1390 135 1605 210" stroke="#FF2C42" stroke-opacity="0.9" stroke-width="18" stroke-linecap="round"/>
+
+  <circle cx="290" cy="92" r="92" fill="url(#spark)"/>
+
+  <g>
+    <path d="M140 100C140 78 158 60 180 60H230C252 60 270 78 270 100V120C270 165 248 197 213 216L209 280H201L197 216C162 197 140 165 140 120V100Z" fill="url(#gold)" stroke="#A06A15" stroke-width="3"/>
+    <path d="M144 102H266" stroke="#EAB74C" stroke-width="2"/>
+    <path d="M180 60L173 35H237L230 60" fill="#F2C95E" stroke="#A06A15" stroke-width="3"/>
+    <path d="M141 96C115 98 101 118 109 141C116 161 132 172 146 170" stroke="#C98B2D" stroke-width="8" stroke-linecap="round"/>
+    <path d="M269 96C295 98 309 118 301 141C294 161 278 172 264 170" stroke="#C98B2D" stroke-width="8" stroke-linecap="round"/>
+    <rect x="186" y="280" width="38" height="10" rx="3" fill="#C27C20"/>
+    <rect x="173" y="290" width="64" height="14" rx="5" fill="#9E5E10"/>
+    <path d="M136 96H276L266 130H146L136 96Z" fill="url(#ribbonA)"/>
+    <text x="206" y="121" text-anchor="middle" font-family="Arial, sans-serif" font-size="26" font-weight="700" fill="#FFEBA4">WINNER</text>
+  </g>
+
+  <circle cx="372" cy="32" r="4" fill="#FFD66A"/>
+  <circle cx="341" cy="54" r="3" fill="#FFD66A"/>
+  <circle cx="330" cy="21" r="3" fill="#FFD66A"/>
+  <circle cx="311" cy="41" r="2.5" fill="#FFD66A"/>
+  <circle cx="360" cy="67" r="2.5" fill="#FFD66A"/>
+</svg>

@@ -104,34 +104,6 @@
   font-size: 24px;
 }
 
-.live-voice-control {
-  margin-top: 10px;
-  display: grid;
-  gap: 6px;
-}
-
-.live-voice-control label {
-  font-weight: 700;
-}
-
-.live-voice-control select {
-  border: 2px solid var(--color-0a0f35);
-  border-radius: 8px;
-  padding: 10px;
-  font-weight: 700;
-}
-
-.live-voice-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-
-.live-voice-actions .ghost-btn {
-  padding: 10px 12px;
-}
-
 .live-bingo-call {
   margin-top: 10px;
   border-radius: 10px;
@@ -164,6 +136,12 @@
   display: grid;
   grid-template-columns: repeat(10, minmax(0, 1fr));
   gap: 4px;
+  transition: opacity 180ms ease, filter 180ms ease;
+}
+
+.live-number-board.frozen {
+  opacity: 0.7;
+  filter: grayscale(0.25);
 }
 
 .live-number-cell {

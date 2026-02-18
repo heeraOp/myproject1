@@ -119,6 +119,39 @@ class GameConsumer(AsyncWebsocketConsumer):
             )
         )
 
+    async def game_update(self, event):
+        payload = event.get("data", {})
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "game_update",
+                    "data": payload,
+                }
+            )
+        )
+
+    async def leaderboard_update(self, event):
+        payload = event.get("data", [])
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "LEADERBOARD_UPDATE",
+                    "data": payload,
+                }
+            )
+        )
+
+    async def winner_announcement(self, event):
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "WINNER_ANNOUNCEMENT",
+                    "winner_name": event.get("winner_name", ""),
+                    "prize_type": event.get("prize_type", ""),
+                }
+            )
+        )
+
     async def announcement_broadcast(self, event):
         await self.send(
             text_data=json.dumps(

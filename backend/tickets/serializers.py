@@ -68,6 +68,23 @@ class AdminTicketBookingSerializer(serializers.Serializer):
         return attrs
 
 
+class AdminTicketAssignmentSerializer(serializers.Serializer):
+    player_name = serializers.CharField(max_length=120)
+    player_phone = serializers.CharField(max_length=20)
+
+    def validate_player_name(self, value):
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError("player_name is required.")
+        return cleaned
+
+    def validate_player_phone(self, value):
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError("player_phone is required.")
+        return cleaned
+
+
 class TicketRequestBookingSerializer(serializers.Serializer):
     player_name = serializers.CharField(max_length=120)
     whatsapp = serializers.CharField(max_length=20)

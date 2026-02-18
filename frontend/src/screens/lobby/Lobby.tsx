@@ -1,33 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
-import AnnouncementBanner from '@/components/common/AnnouncementBanner'
 import { fetchCurrentPublicGame, fetchPublicSupportSettings } from '@/api/rest/games'
-import { fetchGameState } from '@/api/rest/gamePublic'
+import {
+  fetchGameBusinessSummary,
+  fetchGameState,
+  type PublicGameBusinessSummary,
+} from '@/api/rest/gamePublic'
 import { fetchGameTickets, requestTicketBooking } from '@/api/rest/tickets'
 import { socketManager } from '@/api/websocket/socketManager'
 import { useGameSocket } from '@/app/hooks/useGameSocket'
 import { useGameStore } from '@/app/store/game.store'
 import type { PublicGame } from '@/types/backend/game'
 import { normalizeTicketStatus, type PlayerTicket } from '@/types/backend/ticket'
-import {
-  formatThemeLabel,
-  getActiveTheme,
-  isAdminThemeActive,
-  setAdminTheme,
-  subscribeThemeChange,
-  toggleTheme,
-} from '@/utils/theme'
+import { setAdminTheme } from '@/utils/theme'
 import { formatDateInIST, formatTimeInIST } from '@/utils/dateTime'
+import { playMusic, speakText, stopMusic } from '@/utils/speakText'
+import playerLobbyBanner from '@/assets/player-lobby-banner.svg'
 import './Lobby.css'
 
-const formatClock = (dateValue: string): string => {
-  return formatTimeInIST(dateValue)
-}
-
-const formatDate = (dateValue: string): string => {
-  return formatDateInIST(dateValue)
-}
+const formatClock = (dateValue: string): string => formatTimeInIST(dateValue)
+const formatDate = (dateValue: string): string => formatDateInIST(dateValue)
 
 type SupportContact = {
   name: string
@@ -35,8 +28,9 @@ type SupportContact = {
 }
 
 const normalizeWhatsAppNumber = (value: string): string => value.replace(/\D/g, '')
-
 const hasValidCountryCode = (digits: string): boolean => /^[1-9]\d{10,14}$/.test(digits)
+const PRE_GAME_ANNOUNCEMENT_TEXT =
+  'Attention players! The game will begin shortly. Please get ready!'
 
 const toLobbyGameStatus = (status: string | undefined): PublicGame['status'] => {
   if (status === 'FINISHED' || status === 'ENDED') return 'ENDED'
@@ -46,25 +40,44 @@ const toLobbyGameStatus = (status: string | undefined): PublicGame['status'] => 
   return 'CREATED'
 }
 
+const readErrorDetail = (error: unknown, fallback: string): string => {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    typeof (error as { response?: { data?: { detail?: unknown } } }).response?.data?.detail === 'string'
+  ) {
+    return String((error as { response?: { data?: { detail?: string } } }).response?.data?.detail)
+  }
+  return fallback
+}
+
 const Lobby = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  // Optional: mark owned tickets without exposing other players (phone passed via URL).
   const playerPhone = searchParams.get('playerPhone') ?? undefined
-  const [games, setGames] = useState<PublicGame[]>([])
+
   const [selectedGame, setSelectedGame] = useState<PublicGame | null>(null)
   const [tickets, setTickets] = useState<PlayerTicket[]>([])
+  const [businessSummary, setBusinessSummary] = useState<PublicGameBusinessSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [supportNotice, setSupportNotice] = useState<string>('')
-  const [bookingNotice, setBookingNotice] = useState<string>('')
-  const [requestingTicketNumber, setRequestingTicketNumber] = useState<number | null>(null)
+  const [supportNotice, setSupportNotice] = useState('')
+  const [bookingNotice, setBookingNotice] = useState('')
   const [fallbackSupport, setFallbackSupport] = useState<SupportContact | null>(null)
   const [now, setNow] = useState(Date.now())
-  const [theme, setTheme] = useState(getActiveTheme())
-  const [isThemeLocked, setIsThemeLocked] = useState(isAdminThemeActive())
+  const [showBookingDashboard, setShowBookingDashboard] = useState(false)
+  const [selectedTicketNumbers, setSelectedTicketNumbers] = useState<number[]>([])
+  const [bookingPlayerName, setBookingPlayerName] = useState('')
+  const [bookingPlayerPhone, setBookingPlayerPhone] = useState(playerPhone ?? '')
+  const [bookingInProgress, setBookingInProgress] = useState(false)
+  const [requestingTicketNumber, setRequestingTicketNumber] = useState<number | null>(null)
+
   const currentGameIdRef = useRef<string>('')
   const ticketFetchRequestRef = useRef(0)
+  const businessFetchRequestRef = useRef(0)
+  const preGameAnnouncementKeyRef = useRef<string>('')
+
   const {
     gameId: storeGameId,
     tickets: liveTickets,
@@ -73,17 +86,9 @@ const Lobby = () => {
     setActiveTheme,
   } = useGameStore((state) => state)
 
-  const handleThemeToggle = () => {
-    if (isThemeLocked) return
-    setTheme(toggleTheme())
-  }
-
   useEffect(() => {
-    return subscribeThemeChange(({ theme: updatedTheme, isLocked }) => {
-      setTheme(updatedTheme)
-      setIsThemeLocked(isLocked)
-    })
-  }, [])
+    setBookingPlayerPhone(playerPhone ?? '')
+  }, [playerPhone])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -117,24 +122,22 @@ const Lobby = () => {
     }
   }, [])
 
-  // Keep called numbers synced via the existing game websocket feed.
   useGameSocket(selectedGame?.id || undefined)
 
   useEffect(() => {
     let mounted = true
-
     const hydrateLobby = async () => {
       try {
         setLoading(true)
         setError(null)
-
         const currentGame = await fetchCurrentPublicGame()
         if (!mounted) return
 
         if (!currentGame) {
-          setGames([])
           setSelectedGame(null)
           setTickets([])
+          setBusinessSummary(null)
+          setLoading(false)
           return
         }
 
@@ -143,33 +146,22 @@ const Lobby = () => {
         }
         setActiveTheme(currentGame.active_theme ?? null)
 
-        // Public side should only ever see the backend-active game.
-        const game: PublicGame = {
+        setSelectedGame({
           ...currentGame,
           status: toLobbyGameStatus(currentGame.status),
-        }
-        setGames([game])
-        setSelectedGame(game)
-
-        const gameTickets = await fetchGameTickets(game.id, playerPhone)
-        if (!mounted) return
-        setTicketsFromBackend(game.id, gameTickets)
-        setTickets(gameTickets)
+        })
       } catch {
         if (!mounted) return
         setError('Unable to load lobby data.')
-      } finally {
-        if (!mounted) return
         setLoading(false)
       }
     }
 
     void hydrateLobby()
-
     return () => {
       mounted = false
     }
-  }, [playerPhone, searchParams, setActiveTheme, setTicketsFromBackend])
+  }, [searchParams, setActiveTheme])
 
   const fetchTicketsForGame = useCallback(
     async (targetGameId: string) => {
@@ -191,20 +183,70 @@ const Lobby = () => {
     [playerPhone, setTicketsFromBackend],
   )
 
+  const fetchBusinessSummaryForGame = useCallback(async (targetGameId: string) => {
+    const requestId = businessFetchRequestRef.current + 1
+    businessFetchRequestRef.current = requestId
+    try {
+      const summary = await fetchGameBusinessSummary(targetGameId)
+      if (businessFetchRequestRef.current !== requestId) return
+      if (currentGameIdRef.current !== targetGameId) return
+      setBusinessSummary(summary)
+    } catch {
+      if (businessFetchRequestRef.current !== requestId) return
+      if (currentGameIdRef.current !== targetGameId) return
+      setBusinessSummary(null)
+    }
+  }, [])
+
+  const loadStateForGame = useCallback(
+    async (targetGameId: string) => {
+      try {
+        const state = await fetchGameState(targetGameId)
+        if (currentGameIdRef.current !== targetGameId) return
+        replaceFromBackendState(state)
+      } catch {
+        return
+      }
+    },
+    [replaceFromBackendState],
+  )
+
   useEffect(() => {
     const nextGameId = selectedGame?.id ?? ''
     currentGameIdRef.current = nextGameId
     ticketFetchRequestRef.current += 1
+    businessFetchRequestRef.current += 1
+    setSelectedTicketNumbers([])
 
     if (!nextGameId) {
       setTickets([])
+      setBusinessSummary(null)
+      setLoading(false)
       return
     }
 
+    setLoading(true)
+    setError(null)
     setTickets([])
+    setBusinessSummary(null)
     setTicketsFromBackend(nextGameId, [])
-    void fetchTicketsForGame(nextGameId)
-  }, [fetchTicketsForGame, selectedGame?.id, setTicketsFromBackend])
+
+    void (async () => {
+      await Promise.all([
+        fetchTicketsForGame(nextGameId),
+        fetchBusinessSummaryForGame(nextGameId),
+        loadStateForGame(nextGameId),
+      ])
+      if (currentGameIdRef.current !== nextGameId) return
+      setLoading(false)
+    })()
+  }, [
+    fetchBusinessSummaryForGame,
+    fetchTicketsForGame,
+    loadStateForGame,
+    selectedGame?.id,
+    setTicketsFromBackend,
+  ])
 
   useEffect(() => {
     const unsubNewGame = socketManager.subscribe('new_game_created', async (event: unknown) => {
@@ -236,26 +278,69 @@ const Lobby = () => {
         setAdminTheme(nextGame.active_theme)
       }
       setActiveTheme(nextGame.active_theme ?? null)
-      setGames([nextGame])
       setSelectedGame(nextGame)
       setTickets([])
+      setBusinessSummary(null)
       setTicketsFromBackend(nextGameId, [])
+    })
 
-      try {
-        const state = await fetchGameState(nextGameId)
-        if (currentGameIdRef.current !== nextGameId) return
-        replaceFromBackendState(state)
-      } catch {
-        return
-      }
+    const unsubGameStarted = socketManager.subscribe('game.started', () => {
+      setSelectedGame((previous) => {
+        if (!previous) return previous
+        if (currentGameIdRef.current && previous.id !== currentGameIdRef.current) return previous
+        return {
+          ...previous,
+          status: 'RUNNING',
+        }
+      })
     })
 
     const unsubTicketsGenerated = socketManager.subscribe('tickets_generated', async (event: unknown) => {
       const payload = (event as { data?: { game_id?: string } }).data
       const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
       if (!eventGameId || !currentGameIdRef.current || eventGameId !== currentGameIdRef.current) return
-      await fetchTicketsForGame(eventGameId)
+      await Promise.all([
+        fetchTicketsForGame(eventGameId),
+        fetchBusinessSummaryForGame(eventGameId),
+      ])
     })
+
+    const handleGameUpdate = (event: unknown) => {
+      const payload = (
+        event as {
+          data?: {
+            game_id?: string
+            changed_fields?: Partial<PublicGame> & { status?: string }
+          }
+        }
+      ).data
+
+      const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
+      if (!eventGameId || !currentGameIdRef.current || eventGameId !== currentGameIdRef.current) return
+
+      const changedFields = payload?.changed_fields
+      if (!changedFields || typeof changedFields !== 'object') return
+
+      setSelectedGame((previous) => {
+        if (!previous || previous.id !== eventGameId) return previous
+        const nextStatus =
+          typeof changedFields.status === 'string'
+            ? toLobbyGameStatus(changedFields.status)
+            : previous.status
+        return {
+          ...previous,
+          ...changedFields,
+          status: nextStatus,
+        }
+      })
+
+      if (typeof changedFields.active_theme === 'string' && changedFields.active_theme) {
+        setAdminTheme(changedFields.active_theme)
+        setActiveTheme(changedFields.active_theme)
+      }
+    }
+    const unsubGameUpdate = socketManager.subscribe('game_update', handleGameUpdate)
+    const unsubGameUpdateUpper = socketManager.subscribe('GAME_UPDATE', handleGameUpdate)
 
     const unsubTicketBooked = socketManager.subscribe('ticket_booked', async (event: unknown) => {
       const payload = (
@@ -274,8 +359,8 @@ const Lobby = () => {
 
       const ticketId = typeof payload?.ticket_id === 'string' ? payload.ticket_id : ''
       if (ticketId) {
-        setTickets((prev) =>
-          prev.map((ticket) =>
+        setTickets((previous) =>
+          previous.map((ticket) =>
             ticket.id === ticketId
               ? {
                   ...ticket,
@@ -289,7 +374,10 @@ const Lobby = () => {
         )
       }
 
-      await fetchTicketsForGame(eventGameId)
+      await Promise.all([
+        fetchTicketsForGame(eventGameId),
+        fetchBusinessSummaryForGame(eventGameId),
+      ])
     })
 
     const unsubGameFinished = socketManager.subscribe('game.finished', (event: unknown) => {
@@ -298,46 +386,24 @@ const Lobby = () => {
         typeof payload?.status === 'string' ? payload.status : 'ENDED',
       )
       if (nextStatus !== 'ENDED') return
-      const activeGameId = currentGameIdRef.current
 
-      setSelectedGame((prev) => {
-        if (!prev) return prev
-        if (activeGameId && prev.id !== activeGameId) return prev
-        return { ...prev, status: 'ENDED' }
-      })
-
-      setGames((prev) => {
-        if (!activeGameId) return prev
-        return prev.map((game) => (game.id === activeGameId ? { ...game, status: 'ENDED' } : game))
+      setSelectedGame((previous) => {
+        if (!previous) return previous
+        if (currentGameIdRef.current && previous.id !== currentGameIdRef.current) return previous
+        return { ...previous, status: 'ENDED' }
       })
     })
 
     return () => {
       unsubNewGame()
+      unsubGameStarted()
       unsubTicketsGenerated()
+      unsubGameUpdate()
+      unsubGameUpdateUpper()
       unsubTicketBooked()
       unsubGameFinished()
     }
-  }, [fetchTicketsForGame, replaceFromBackendState, setActiveTheme, setTicketsFromBackend])
-
-  useEffect(() => {
-    let mounted = true
-    const loadState = async () => {
-      if (!selectedGame?.id) return
-      try {
-        const state = await fetchGameState(selectedGame.id)
-        if (!mounted) return
-        // Seed backend game state for number-board consistency on refresh.
-        replaceFromBackendState(state)
-      } catch {
-        return
-      }
-    }
-    void loadState()
-    return () => {
-      mounted = false
-    }
-  }, [replaceFromBackendState, selectedGame?.id])
+  }, [fetchBusinessSummaryForGame, fetchTicketsForGame, setActiveTheme, setTicketsFromBackend])
 
   useEffect(() => {
     if (!selectedGame?.id || storeGameId !== selectedGame.id) return
@@ -345,31 +411,46 @@ const Lobby = () => {
   }, [liveTickets, selectedGame?.id, storeGameId])
 
   const countdown = useMemo(() => {
-    if (!selectedGame) {
-      return { hours: 0, minutes: 0, seconds: 0 }
-    }
-
+    if (!selectedGame) return { hours: 0, minutes: 0, seconds: 0 }
     const startAt = new Date(selectedGame.date).getTime()
     const diff = Math.max(0, startAt - now)
     const totalSeconds = Math.floor(diff / 1000)
-
     const hours = Math.floor(totalSeconds / 3600)
     const minutes = Math.floor((totalSeconds % 3600) / 60)
     const seconds = totalSeconds % 60
-
     return { hours, minutes, seconds }
   }, [now, selectedGame])
 
-  const ticketsBooked = useMemo(
-    () => tickets.filter((ticket) => normalizeTicketStatus(ticket.status) === 'CONFIRMED').length,
+  const digitalCountdown = `${String(countdown.hours).padStart(2, '0')}:${String(
+    countdown.minutes,
+  ).padStart(2, '0')}:${String(countdown.seconds).padStart(2, '0')}`
+
+  const orderedTickets = useMemo(
+    () => [...tickets].sort((first, second) => first.ticket_number - second.ticket_number),
     [tickets],
   )
-  const currentGame = selectedGame
 
-  const ticketsLeft = useMemo(() => {
-    if (!selectedGame) return 0
-    return Math.max(0, tickets.length - ticketsBooked)
-  }, [selectedGame, tickets.length, ticketsBooked])
+  useEffect(() => {
+    const availableNumbers = new Set(
+      tickets
+        .filter((ticket) => normalizeTicketStatus(ticket.status) === 'AVAILABLE')
+        .map((ticket) => ticket.ticket_number),
+    )
+    setSelectedTicketNumbers((previous) => {
+      const next = previous.filter((ticketNumber) => availableNumbers.has(ticketNumber))
+      return next.length === previous.length ? previous : next
+    })
+  }, [tickets])
+
+  const selectedTickets = useMemo(() => {
+    const ticketMap = new Map(orderedTickets.map((ticket) => [ticket.ticket_number, ticket]))
+    return selectedTicketNumbers
+      .map((ticketNumber) => ticketMap.get(ticketNumber))
+      .filter((ticket): ticket is PlayerTicket => Boolean(ticket))
+  }, [orderedTickets, selectedTicketNumbers])
+
+  const selectedBookingMode: 'HALF_SHEET' | 'FULL_SHEET' | null =
+    selectedTicketNumbers.length === 6 ? 'FULL_SHEET' : selectedTicketNumbers.length === 3 ? 'HALF_SHEET' : null
 
   const supportContact = useMemo<SupportContact | null>(() => {
     const agent = selectedGame?.agent
@@ -388,6 +469,47 @@ const Lobby = () => {
   )
 
   const canContactSupport = hasValidCountryCode(supportDigits)
+  const isBookingClosed = selectedGame?.status === 'ENDED' || selectedGame?.booking_status === 'CLOSED'
+  const gameDisplayName = selectedGame?.name?.trim() || 'Tambola Game'
+
+  useEffect(() => {
+    if (!selectedGame?.id || !selectedGame.date) return
+    if (selectedGame.status === 'RUNNING' || selectedGame.status === 'PAUSED' || selectedGame.status === 'ENDED') {
+      return
+    }
+
+    const startAt = new Date(selectedGame.date).getTime()
+    if (!Number.isFinite(startAt)) return
+
+    const timeToStartMs = startAt - now
+    const withinPreGameWindow = timeToStartMs > 0 && timeToStartMs <= 2 * 60 * 1000
+    if (!withinPreGameWindow) return
+
+    const announcementKey = `${selectedGame.id}:${selectedGame.date}`
+    if (preGameAnnouncementKeyRef.current === announcementKey) return
+    preGameAnnouncementKeyRef.current = announcementKey
+
+    void (async () => {
+      await playMusic('/sounds/intro_music.mp3', {
+        loop: true,
+        volume: 0.25,
+        fadeInMs: 600,
+      })
+      await speakText(PRE_GAME_ANNOUNCEMENT_TEXT, 'dramatic')
+    })()
+  }, [now, selectedGame?.date, selectedGame?.id, selectedGame?.status])
+
+  useEffect(() => {
+    const status = selectedGame?.status
+    if (status !== 'RUNNING') return
+    void stopMusic({ fadeOutMs: 1200 })
+  }, [selectedGame?.status])
+
+  useEffect(() => {
+    return () => {
+      void stopMusic({ fadeOutMs: 400 })
+    }
+  }, [])
 
   useEffect(() => {
     setSupportNotice('')
@@ -403,27 +525,172 @@ const Lobby = () => {
     const message = encodeURIComponent(
       `Hello ${supportName}, I have a question about Game ${selectedGame?.id ?? 'current'}`,
     )
-    const url = `https://wa.me/${supportDigits}?text=${message}`
-    window.open(url, '_blank', 'noopener,noreferrer')
+    window.open(`https://wa.me/${supportDigits}?text=${message}`, '_blank', 'noopener,noreferrer')
     setSupportNotice('')
   }
 
-  const handleRequestBooking = async (ticket: PlayerTicket) => {
-    if (!selectedGame?.id) return
-    if (selectedGame.status === 'ENDED') {
+  const openBookingDashboard = () => {
+    setShowBookingDashboard(true)
+    setBookingNotice('')
+    if (selectedGame?.id) {
+      void Promise.all([
+        fetchTicketsForGame(selectedGame.id),
+        fetchBusinessSummaryForGame(selectedGame.id),
+      ])
+    }
+  }
+
+  const closeBookingDashboard = () => {
+    setShowBookingDashboard(false)
+    setSelectedTicketNumbers([])
+  }
+
+  const toggleTicketSelection = (ticket: PlayerTicket) => {
+    if (isBookingClosed) {
       setBookingNotice('Booking is closed for this game.')
       return
     }
     if (normalizeTicketStatus(ticket.status) !== 'AVAILABLE') return
 
-    const playerNameInput = window.prompt('Enter your name')
-    if (playerNameInput === null) return
-    const playerName = playerNameInput.trim()
-    const whatsappInput = window.prompt('Enter your WhatsApp number', playerPhone ?? '')
-    if (whatsappInput === null) return
-    const whatsapp = whatsappInput.trim()
-    if (!playerName || !whatsapp) {
-      setBookingNotice('Enter player name and WhatsApp to request booking.')
+    setSelectedTicketNumbers((previous) => {
+      if (previous.includes(ticket.ticket_number)) {
+        return previous.filter((ticketNumber) => ticketNumber !== ticket.ticket_number)
+      }
+      return [...previous, ticket.ticket_number].sort((first, second) => first - second)
+    })
+    setBookingNotice('')
+  }
+
+  const handleBookNow = async () => {
+    if (!selectedGame?.id) return
+    if (isBookingClosed) {
+      setBookingNotice('Booking is closed for this game.')
+      return
+    }
+
+    const sortedTicketNumbers = [...selectedTicketNumbers].sort((first, second) => first - second)
+    if (sortedTicketNumbers.length === 0) {
+      setBookingNotice('Select tickets to continue.')
+      return
+    }
+    if (selectedTickets.some((ticket) => normalizeTicketStatus(ticket.status) !== 'AVAILABLE')) {
+      setBookingNotice('One or more selected tickets are no longer available.')
+      return
+    }
+
+    let playerNameValue = bookingPlayerName.trim()
+    if (!playerNameValue) {
+      const nameInput = window.prompt('Enter your name')
+      if (nameInput === null) return
+      playerNameValue = nameInput.trim()
+    }
+
+    let playerPhoneValue = bookingPlayerPhone.trim() || String(playerPhone ?? '').trim()
+    if (!playerPhoneValue) {
+      const phoneInput = window.prompt('Enter your WhatsApp number', playerPhone ?? '')
+      if (phoneInput === null) return
+      playerPhoneValue = phoneInput.trim()
+    }
+
+    if (!playerNameValue || !playerPhoneValue) {
+      setBookingNotice('Enter player name and WhatsApp to continue.')
+      return
+    }
+
+    setBookingPlayerName(playerNameValue)
+    setBookingPlayerPhone(playerPhoneValue)
+    setBookingInProgress(true)
+    setBookingNotice('')
+
+    try {
+      const selectedTicketIds = selectedTickets
+        .map((ticket) => ticket.id)
+        .filter((ticketId): ticketId is string => typeof ticketId === 'string' && ticketId.length > 0)
+
+      if (selectedTicketIds.length !== selectedTickets.length) {
+        setBookingNotice('Unable to request selected tickets right now. Please refresh and try again.')
+        return
+      }
+
+      let successCount = 0
+      let firstFailureMessage = ''
+      for (const ticketId of selectedTicketIds) {
+        try {
+          await requestTicketBooking(ticketId, {
+            player_name: playerNameValue,
+            whatsapp: playerPhoneValue,
+          })
+          successCount += 1
+        } catch (errorValue) {
+          if (!firstFailureMessage) {
+            firstFailureMessage = readErrorDetail(errorValue, 'Some tickets could not be requested.')
+          }
+        }
+      }
+
+      if (successCount === 0) {
+        setBookingNotice(firstFailureMessage || 'Unable to request booking right now.')
+        return
+      }
+
+      await Promise.all([
+        fetchTicketsForGame(selectedGame.id),
+        fetchBusinessSummaryForGame(selectedGame.id),
+      ])
+      setSelectedTicketNumbers([])
+
+      const seatLabel = selectedBookingMode === 'HALF_SHEET' ? ' (Halfsheet)' : selectedBookingMode === 'FULL_SHEET' ? ' (Fullsheet)' : ''
+      if (successCount < selectedTicketIds.length) {
+        setBookingNotice(
+          `Booking request sent for ${successCount} of ${selectedTicketIds.length} tickets${seatLabel}. ${firstFailureMessage}`,
+        )
+      } else {
+        setBookingNotice(`Booking request sent for ${selectedTicketIds.length} tickets${seatLabel}.`)
+      }
+    } catch (errorValue) {
+      setBookingNotice(readErrorDetail(errorValue, 'Unable to request booking right now.'))
+    } finally {
+      setBookingInProgress(false)
+    }
+  }
+
+  const ticketsBookedCount = businessSummary?.tickets_booked ?? 0
+  const halfsheetBookedCount = businessSummary?.halfsheet_booked ?? 0
+  const fullsheetBookedCount = businessSummary?.fullsheet_booked ?? 0
+
+  const handleEnterLiveGame = () => {
+    const params = new URLSearchParams()
+    const normalizedPhone = String(playerPhone ?? '').trim()
+    if (normalizedPhone) {
+      params.set('playerPhone', normalizedPhone)
+    }
+    navigate(`/live${params.toString() ? `?${params.toString()}` : ''}`)
+  }
+
+  const handleRequestBooking = async (ticket: PlayerTicket) => {
+    if (!selectedGame?.id) return
+    if (isBookingClosed) {
+      setBookingNotice('Booking is closed for this game.')
+      return
+    }
+    if (normalizeTicketStatus(ticket.status) !== 'AVAILABLE') return
+
+    let playerNameValue = bookingPlayerName.trim()
+    if (!playerNameValue) {
+      const nameInput = window.prompt('Enter your name')
+      if (nameInput === null) return
+      playerNameValue = nameInput.trim()
+    }
+
+    let playerPhoneValue = bookingPlayerPhone.trim() || String(playerPhone ?? '').trim()
+    if (!playerPhoneValue) {
+      const phoneInput = window.prompt('Enter your WhatsApp number', playerPhone ?? '')
+      if (phoneInput === null) return
+      playerPhoneValue = phoneInput.trim()
+    }
+
+    if (!playerNameValue || !playerPhoneValue) {
+      setBookingNotice('Enter player name and WhatsApp to continue.')
       return
     }
 
@@ -432,151 +699,626 @@ const Lobby = () => {
       return
     }
 
+    setBookingPlayerName(playerNameValue)
+    setBookingPlayerPhone(playerPhoneValue)
     setRequestingTicketNumber(ticket.ticket_number)
     setBookingNotice('')
     try {
       await requestTicketBooking(ticket.id, {
-        player_name: playerName,
-        whatsapp,
+        player_name: playerNameValue,
+        whatsapp: playerPhoneValue,
       })
-
-      const latestTickets = await fetchGameTickets(selectedGame.id, playerPhone)
-      setTicketsFromBackend(selectedGame.id, latestTickets)
-      setTickets(latestTickets)
+      await Promise.all([
+        fetchTicketsForGame(selectedGame.id),
+        fetchBusinessSummaryForGame(selectedGame.id),
+      ])
       setBookingNotice(`Booking request sent for ticket ${ticket.ticket_number}.`)
-    } catch (error: unknown) {
-      const detail =
-        typeof error === 'object' &&
-        error !== null &&
-        'response' in error &&
-        typeof (error as { response?: { data?: { detail?: unknown } } }).response?.data?.detail ===
-          'string'
-          ? String((error as { response?: { data?: { detail?: string } } }).response?.data?.detail)
-          : 'Unable to request booking right now.'
-      setBookingNotice(detail)
+    } catch (errorValue) {
+      setBookingNotice(readErrorDetail(errorValue, 'Unable to request booking right now.'))
     } finally {
       setRequestingTicketNumber(null)
     }
   }
 
-  const enterLiveGame = () => {
-    if (!selectedGame?.id) return
-    navigate(`/live?gameId=${selectedGame.id}`)
-  }
-
   return (
-    <main className="lobby-shell">
-      <h1 className="player-game-title">{currentGame?.name}</h1>
-      <AnnouncementBanner gameId={selectedGame?.id} />
-      <section className="lobby-panel">
-        <div className="lobby-actions">
+    <main
+      className="lobby-shell"
+      style={{
+        minHeight: '100vh',
+        background: '#e8c7c7',
+        padding: '10px 10px 24px',
+        display: 'flex',
+        justifyContent: 'center',
+      }}
+    >
+      <section
+        className="lobby-panel"
+        style={{
+          width: '100%',
+          maxWidth: '1100px',
+          margin: 0,
+          background: 'transparent',
+          border: 'none',
+          backdropFilter: 'none',
+          padding: 0,
+          borderRadius: 0,
+        }}
+      >
+        <div
+          style={{
+            position: 'relative',
+            width: '100%',
+            minHeight: 'clamp(130px, 18vw, 260px)',
+            borderRadius: '8px',
+            overflow: 'hidden',
+            backgroundImage: `url(${playerLobbyBanner})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            marginBottom: '8px',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0 clamp(14px, 4vw, 42px) 0 clamp(120px, 18vw, 300px)',
+            }}
+          >
+            <div
+              style={{
+                width: '100%',
+                textAlign: 'center',
+                color: '#ffffff',
+                fontWeight: 800,
+                fontSize: 'clamp(18px, 3.1vw, 48px)',
+                letterSpacing: '0.5px',
+                lineHeight: 1.1,
+                textShadow: '0 3px 12px rgba(0, 0, 0, 0.75)',
+                textTransform: 'uppercase',
+              }}
+            >
+              {gameDisplayName}
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+            gap: '8px',
+          }}
+        >
           <button
-            className="action-link"
             type="button"
             onClick={handleContactSupport}
             disabled={!canContactSupport}
+            style={{
+              background: '#008b10',
+              border: '3px solid #6b6b6b',
+              borderRadius: '10px',
+              color: '#fff',
+              fontSize: 'clamp(18px, 2.2vw, 30px)',
+              fontWeight: 700,
+              padding: '12px 10px',
+              cursor: canContactSupport ? 'pointer' : 'not-allowed',
+            }}
           >
-            Contact Support (WhatsApp)
+            Whatsapp
           </button>
-          <button className="action-link" type="button">
+          <button
+            type="button"
+            style={{
+              background: '#f20f0f',
+              border: '3px solid #6b6b6b',
+              borderRadius: '10px',
+              color: '#fff',
+              fontSize: 'clamp(18px, 2.2vw, 30px)',
+              fontWeight: 700,
+              padding: '12px 10px',
+              cursor: 'pointer',
+            }}
+          >
             Agent list
           </button>
-          <a className="action-link" href={import.meta.env.VITE_CALL_URL ?? '#'} target="_blank" rel="noreferrer">
-            Call
-          </a>
-          <button className="action-link" type="button">
-            Login
-          </button>
-          <button className="action-link" type="button" onClick={handleThemeToggle} disabled={isThemeLocked}>
-            Theme: {formatThemeLabel(theme)}
-          </button>
         </div>
-        {supportContact?.name && <div className="support-meta">Support: {supportContact.name}</div>}
-        {supportNotice && <div className="support-meta support-meta--warn">{supportNotice}</div>}
-        {bookingNotice && <div className="booking-notice">{bookingNotice}</div>}
 
-        <div className="lobby-game-picker">
-          <label htmlFor="lobby-game">Active game</label>
-          <select
-            id="lobby-game"
-            value={selectedGame?.id ?? ''}
-            onChange={(event) => {
-              const game = games.find((item) => item.id === event.target.value) ?? null
-              setSelectedGame(game)
+        <button
+          className="check-title"
+          type="button"
+          onClick={openBookingDashboard}
+          disabled={!selectedGame}
+          style={{
+            margin: '28px auto 0',
+            width: 'min(900px, 100%)',
+            minHeight: '220px',
+            borderRadius: 0,
+            border: 'none',
+            background: '#000',
+            color: '#ff0f0f',
+            fontSize: 'clamp(44px, 6vw, 84px)',
+            fontWeight: 800,
+            lineHeight: 1.1,
+            letterSpacing: '1px',
+            textShadow: '0 0 18px rgba(255, 0, 0, 0.95)',
+            cursor: selectedGame ? 'pointer' : 'not-allowed',
+            padding: '20px',
+          }}
+        >
+          CHECK AVAILABLE TICKET
+        </button>
+
+        <div
+          style={{
+            margin: '30px auto 0',
+            width: 'min(900px, 100%)',
+            background: '#efefef',
+            borderRadius: '0 0 24px 24px',
+            textAlign: 'center',
+            padding: '24px 12px 34px',
+          }}
+        >
+          <div
+            style={{
+              color: '#000',
+              fontSize: 'clamp(80px, 12vw, 170px)',
+              lineHeight: 1,
+              fontWeight: 500,
             }}
-            disabled={!games.length}
           >
-            {!games.length && <option value="">No game</option>}
-            {games.map((game) => (
-              <option key={game.id} value={game.id}>
-                {game.name} - {formatDate(game.date)} {formatClock(game.date)} ({game.status})
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="support-meta">Game: {selectedGame?.name ?? '--'}</div>
-
-        <div className="check-title">CHECK AVAILABLE TICKET</div>
-
-        <div className="lobby-status-row">
-          <span className={`status-chip ${selectedGame?.status === 'RUNNING' ? 'running' : ''}`}>
-            {selectedGame?.status ?? 'NO GAME'}
-          </span>
-          <span className={`status-chip ${selectedGame?.booking_status === 'OPEN' ? 'open' : 'closed'}`}>
-            BOOKING {selectedGame?.booking_status ?? 'CLOSED'}
-          </span>
-          <button className="enter-live-btn" type="button" onClick={enterLiveGame} disabled={!selectedGame}>
-            Enter Live Game
-          </button>
-        </div>
-
-        <div className="count-labels">
-          <span>Hours</span>
-          <span>Minutes</span>
-          <span>Seconds</span>
-        </div>
-        <div className="count-values">
-          <span>{countdown.hours}</span>
-          <span>{countdown.minutes}</span>
-          <span>{countdown.seconds}</span>
-        </div>
-
-        <div className="date-time">
-          <span>{selectedGame ? formatDate(selectedGame.date) : '--/--/----'}</span>
-          <span>{selectedGame ? formatClock(selectedGame.date) : '--:--:--'}</span>
-        </div>
-
-        <div className="ticket-stats">
-          <div>
-            <strong>Total</strong>
-            <span>{tickets.length}</span>
+            {digitalCountdown}
           </div>
-          <div>
-            <strong>Booked</strong>
-            <span>{ticketsBooked}</span>
-          </div>
-          <div>
-            <strong>Available</strong>
-            <span>{ticketsLeft}</span>
+          <div
+            style={{
+              marginTop: '18px',
+              color: '#111',
+              fontSize: 'clamp(30px, 4.2vw, 54px)',
+              fontWeight: 500,
+              lineHeight: 1.1,
+            }}
+          >
+            {selectedGame ? `${formatDate(selectedGame.date)} ${formatClock(selectedGame.date)}` : '--/--/---- --:--:--'}
           </div>
         </div>
 
-        {loading && <div className="state-box">Loading tickets...</div>}
-        {!loading && error && <div className="state-box state-error">{error}</div>}
-        {!loading && !error && games.length === 0 && <div className="state-box">No active game available.</div>}
+        <div
+          style={{
+            margin: '12px auto 0',
+            width: 'min(900px, 100%)',
+            borderRadius: '12px',
+            border: '2px solid #6b6b6b',
+            background: '#ffffff',
+            color: '#111',
+            textAlign: 'center',
+            padding: '10px 12px',
+            fontWeight: 700,
+            fontSize: 'clamp(16px, 2vw, 28px)',
+          }}
+        >
+          Game Status: {selectedGame?.status ?? 'NO GAME'}
+        </div>
 
-        {!loading &&
-          !error &&
-          tickets.map((ticket) => (
-            <TambolaTicketCard
-              key={ticket.ticket_number}
-              ticket={ticket}
-              variant="player"
-              onRequestBooking={handleRequestBooking}
-              requestingTicketNumber={requestingTicketNumber}
-              bookingClosed={selectedGame?.status === 'ENDED'}
-            />
-          ))}
+        <button
+          type="button"
+          onClick={handleEnterLiveGame}
+          disabled={!selectedGame}
+          style={{
+            margin: '10px auto 0',
+            width: 'min(900px, 100%)',
+            border: 'none',
+            borderRadius: '12px',
+            background: '#111',
+            color: '#fff',
+            textAlign: 'center',
+            padding: '12px 14px',
+            fontWeight: 800,
+            fontSize: 'clamp(18px, 2.1vw, 30px)',
+            cursor: selectedGame ? 'pointer' : 'not-allowed',
+            opacity: selectedGame ? 1 : 0.6,
+          }}
+        >
+          ENTER LIVE GAME
+        </button>
+
+        {error && (
+          <div
+            style={{
+              marginTop: '14px',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              border: '1px solid #ff8f8f',
+              background: '#fff2f2',
+              color: '#9f0000',
+              fontWeight: 600,
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {supportNotice && (
+          <div
+            style={{
+              marginTop: '10px',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              border: '1px solid #ffbebe',
+              background: '#fff5f5',
+              color: '#9f0000',
+              fontWeight: 600,
+            }}
+          >
+            {supportNotice}
+          </div>
+        )}
+
+        {bookingNotice && !showBookingDashboard && (
+          <div
+            style={{
+              marginTop: '10px',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              border: '1px solid #d7d7d7',
+              background: '#fff',
+              color: '#111',
+              fontWeight: 600,
+            }}
+          >
+            {bookingNotice}
+          </div>
+        )}
+
+        <section
+          style={{
+            marginTop: '20px',
+            width: '100%',
+          }}
+        >
+          {loading && (
+            <div
+              style={{
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border: '1px solid #d7d7d7',
+                background: '#fff',
+                color: '#111',
+                fontWeight: 600,
+              }}
+            >
+              Loading tickets...
+            </div>
+          )}
+
+          {!loading && !error && orderedTickets.length === 0 && (
+            <div
+              style={{
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border: '1px solid #d7d7d7',
+                background: '#fff',
+                color: '#111',
+                fontWeight: 600,
+              }}
+            >
+              No tickets available for this game.
+            </div>
+          )}
+
+          {!loading && !error && orderedTickets.length > 0 && (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+                gap: '14px',
+                alignItems: 'start',
+              }}
+            >
+              {orderedTickets.map((ticket) => (
+                <TambolaTicketCard
+                  key={ticket.ticket_number}
+                  ticket={ticket}
+                  variant="player"
+                  onRequestBooking={handleRequestBooking}
+                  requestingTicketNumber={requestingTicketNumber}
+                  bookingClosed={isBookingClosed}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        {showBookingDashboard && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 50,
+              background: 'rgba(0, 0, 0, 0.45)',
+              padding: '10px',
+              overflowY: 'auto',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'flex-start',
+            }}
+          >
+            <section
+              style={{
+                width: 'min(980px, 100%)',
+                border: '6px solid #ffd400',
+                borderRadius: '12px',
+                background: '#1a0649',
+                boxShadow: '0 20px 40px rgba(0, 0, 0, 0.45)',
+              }}
+            >
+              <header
+                style={{
+                  background: '#000',
+                  padding: '16px 18px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  borderBottom: '2px solid #230066',
+                }}
+              >
+                <h2
+                  style={{
+                    margin: 0,
+                    color: '#ff1d1d',
+                    fontSize: 'clamp(28px, 3.2vw, 54px)',
+                    fontWeight: 800,
+                    textShadow: '0 0 14px rgba(255, 0, 0, 0.9)',
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  Booking dashboard
+                </h2>
+                <button
+                  type="button"
+                  onClick={closeBookingDashboard}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#f0f0f0',
+                    fontSize: 'clamp(36px, 4vw, 64px)',
+                    lineHeight: 1,
+                    cursor: 'pointer',
+                    fontWeight: 300,
+                    padding: 0,
+                  }}
+                  aria-label="Close booking dashboard"
+                >
+                  X
+                </button>
+              </header>
+
+              <div style={{ padding: '12px 14px 16px' }}>
+                <input
+                  value={bookingPlayerName}
+                  onChange={(event) => setBookingPlayerName(event.target.value)}
+                  placeholder="Enter your name"
+                  style={{
+                    width: '100%',
+                    borderRadius: '8px',
+                    border: '1px solid #c8c8c8',
+                    fontSize: 'clamp(18px, 2.1vw, 28px)',
+                    padding: '10px 12px',
+                    marginBottom: '10px',
+                    outline: 'none',
+                  }}
+                />
+
+                {bookingNotice && (
+                  <div
+                    style={{
+                      marginBottom: '10px',
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      border: '1px solid #4f2ab9',
+                      background: '#240b66',
+                      color: '#f2edff',
+                      fontWeight: 600,
+                      fontSize: '14px',
+                    }}
+                  >
+                    {bookingNotice}
+                  </div>
+                )}
+
+                {loading ? (
+                  <div
+                    style={{
+                      minHeight: '180px',
+                      borderRadius: '8px',
+                      border: '2px solid #2400ff',
+                      background: '#18004d',
+                      display: 'grid',
+                      placeItems: 'center',
+                      color: '#fff',
+                      fontSize: '24px',
+                      fontWeight: 700,
+                    }}
+                  >
+                    Loading tickets...
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      borderRadius: '8px',
+                      border: '2px solid #2200ff',
+                      background: '#0f00ff',
+                      padding: '10px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+                        gap: '10px',
+                      }}
+                    >
+                      {orderedTickets.map((ticket) => {
+                        const backendStatus = normalizeTicketStatus(ticket.status)
+                        const isAvailable = backendStatus === 'AVAILABLE'
+                        const isPending = backendStatus === 'PENDING'
+                        const isSelected = selectedTicketNumbers.includes(ticket.ticket_number)
+                        const isDisabled = !isAvailable || bookingInProgress || isBookingClosed
+                        const isDisplayAvailable = isAvailable && !isBookingClosed
+                        const backgroundColor = isSelected
+                          ? '#43d55e'
+                          : isDisplayAvailable
+                            ? '#f7f309'
+                            : isPending
+                              ? '#ffd8a8'
+                              : '#e0e0e0'
+                        const borderColor = isSelected
+                          ? '#0d8f35'
+                          : isDisplayAvailable
+                            ? '#ff1616'
+                            : isPending
+                              ? '#d07b00'
+                              : '#bfbfbf'
+                        const statusText = isSelected
+                          ? 'SELECTED'
+                          : isDisplayAvailable
+                            ? 'AVAILABLE'
+                            : isAvailable
+                              ? 'ENDED'
+                              : isPending
+                                ? 'PENDING'
+                                : 'BOOKED'
+
+                        return (
+                          <button
+                            key={ticket.ticket_number}
+                            type="button"
+                            onClick={() => toggleTicketSelection(ticket)}
+                            disabled={isDisabled}
+                            style={{
+                              borderRadius: '8px',
+                              border: `2px solid ${borderColor}`,
+                              background: backgroundColor,
+                              color: '#111',
+                              padding: '7px 6px',
+                              minHeight: '58px',
+                              fontWeight: 800,
+                              cursor: isDisabled ? 'not-allowed' : 'pointer',
+                              opacity: isDisabled && !isSelected ? 0.88 : 1,
+                              display: 'grid',
+                              alignContent: 'center',
+                              justifyItems: 'center',
+                              gap: '2px',
+                            }}
+                          >
+                            <span style={{ fontSize: '24px', lineHeight: 1 }}>{ticket.ticket_number}</span>
+                            <span style={{ fontSize: '11px', fontWeight: 700 }}>{statusText}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    marginTop: '12px',
+                    color: '#f4ecff',
+                    textAlign: 'center',
+                    fontWeight: 700,
+                    fontSize: '15px',
+                  }}
+                >
+                  {selectedTicketNumbers.length === 0
+                    ? 'Select ticket(s). 3 tickets = Halfsheet, 6 tickets = Fullsheet.'
+                    : selectedBookingMode
+                      ? `${selectedBookingMode === 'HALF_SHEET' ? 'Halfsheet' : 'Fullsheet'} selected (${selectedTicketNumbers.length} tickets)`
+                      : `${selectedTicketNumbers.length} ticket(s) selected`}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void handleBookNow()}
+                  disabled={selectedTicketNumbers.length === 0 || bookingInProgress || loading || isBookingClosed}
+                  style={{
+                    marginTop: '8px',
+                    width: '100%',
+                    border: 'none',
+                    borderRadius: '14px',
+                    background: '#f21717',
+                    color: '#fff',
+                    fontWeight: 800,
+                    fontSize: 'clamp(18px, 2.4vw, 32px)',
+                    padding: '12px 10px',
+                    cursor:
+                      selectedTicketNumbers.length === 0 || bookingInProgress || loading || isBookingClosed
+                        ? 'not-allowed'
+                        : 'pointer',
+                    opacity: selectedTicketNumbers.length === 0 || bookingInProgress || loading || isBookingClosed ? 0.65 : 1,
+                  }}
+                >
+                  {bookingInProgress ? 'BOOKING...' : 'BOOK NOW'}
+                </button>
+
+                <div
+                  style={{
+                    marginTop: '10px',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                    gap: '10px',
+                  }}
+                >
+                  <div
+                    style={{
+                      border: '2px solid #ff1f1f',
+                      borderRadius: '999px',
+                      background: '#1d0b59',
+                      color: '#ff1616',
+                      textAlign: 'center',
+                      fontWeight: 800,
+                      padding: '6px',
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    <div style={{ fontSize: 'clamp(14px, 1.6vw, 22px)' }}>Ticket booked</div>
+                    <div style={{ fontSize: 'clamp(20px, 2.3vw, 34px)' }}>{ticketsBookedCount}</div>
+                  </div>
+                  <div
+                    style={{
+                      border: '2px solid #ff1f1f',
+                      borderRadius: '999px',
+                      background: '#1d0b59',
+                      color: '#ff1616',
+                      textAlign: 'center',
+                      fontWeight: 800,
+                      padding: '6px',
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    <div style={{ fontSize: 'clamp(14px, 1.6vw, 22px)' }}>Halfsheet booked</div>
+                    <div style={{ fontSize: 'clamp(20px, 2.3vw, 34px)' }}>{halfsheetBookedCount}</div>
+                  </div>
+                  <div
+                    style={{
+                      border: '2px solid #ff1f1f',
+                      borderRadius: '999px',
+                      background: '#1d0b59',
+                      color: '#ff1616',
+                      textAlign: 'center',
+                      fontWeight: 800,
+                      padding: '6px',
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    <div style={{ fontSize: 'clamp(14px, 1.6vw, 22px)' }}>Fullsheet booked</div>
+                    <div style={{ fontSize: 'clamp(20px, 2.3vw, 34px)' }}>{fullsheetBookedCount}</div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
       </section>
     </main>
   )

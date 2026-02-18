@@ -14,3 +14,12 @@ export const fetchCurrentUser = async (): Promise<CurrentUserResponse> => {
   const response = await adminApiClient.get<CurrentUserResponse>('/users/me/')
   return response.data
 }
+
+export const logoutCurrentUser = async (): Promise<void> => {
+  try {
+    await adminApiClient.get('/users/csrf/')
+  } catch {
+    // Ignore CSRF bootstrap failures and let backend validation respond.
+  }
+  await adminApiClient.post('/users/logout/')
+}

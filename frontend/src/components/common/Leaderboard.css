@@ -1,0 +1,42 @@
+.leaderboard-card {
+  max-width: 1080px;
+  margin: 0 auto 14px;
+  border-radius: 16px;
+  border: 2px solid var(--color-0d1346);
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow);
+  padding: 10px;
+}
+
+.leaderboard-card h2 {
+  margin: 0 0 10px;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 30px;
+  letter-spacing: 1px;
+}
+
+.leaderboard-table-wrap {
+  overflow-x: auto;
+}
+
+.leaderboard-table-wrap table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+}
+
+.leaderboard-table-wrap th {
+  background: rgba(9, 9, 9, 0.86);
+  color: var(--color-fff);
+  text-align: left;
+  padding: 10px;
+}
+
+.leaderboard-table-wrap td {
+  background: rgba(248, 248, 255, 0.84);
+  color: var(--color-111);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-d8dbff);
+  font-weight: 600;
+}

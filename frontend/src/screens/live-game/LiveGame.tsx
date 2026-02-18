@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
 import AnnouncementBanner from '@/components/common/AnnouncementBanner'
-import WinnerCelebrationOverlay from '@/components/common/WinnerCelebrationOverlay'
+import Leaderboard, { type LeaderboardEntry } from '@/components/common/Leaderboard'
+import WinnerPopup from '@/components/common/WinnerPopup'
 import { fetchCurrentPublicGame } from '@/api/rest/games'
 import { fetchGameTickets } from '@/api/rest/tickets'
 import {
@@ -18,7 +19,6 @@ import { socketManager } from '@/api/websocket/socketManager'
 import { useGameSocket } from '@/app/hooks/useGameSocket'
 import { useBingoCaller } from '@/app/hooks/useBingoCaller'
 import { useGameStore } from '@/app/store/game.store'
-import { useVoiceModeStore, type VoiceMode, VOICE_MODE_OPTIONS } from '@/app/store/voiceMode.store'
 import type { PublicGame } from '@/types/backend/game'
 import type { PlayerTicket } from '@/types/backend/ticket'
 import {
@@ -30,6 +30,7 @@ import {
   toggleTheme,
 } from '@/utils/theme'
 import { formatDateTimeInIST } from '@/utils/dateTime'
+import { playWinnerSoundFlow } from '@/utils/speakText'
 import './LiveGame.css'
 
 const PRIZE_LABEL_MAP: Record<string, string> = {
@@ -59,6 +60,59 @@ const dedupeWinners = (winners: Array<PublicWinner>) => {
   })
 }
 
+const areLeaderboardEntriesEqual = (
+  previous: LeaderboardEntry[],
+  next: LeaderboardEntry[],
+): boolean => {
+  if (previous === next) return true
+  if (previous.length !== next.length) return false
+  for (let index = 0; index < previous.length; index += 1) {
+    const left = previous[index]
+    const right = next[index]
+    if (!right) return false
+    if (
+      left.user_id !== right.user_id ||
+      left.username !== right.username ||
+      left.total_marked !== right.total_marked ||
+      left.remaining_for_full_house !== right.remaining_for_full_house ||
+      left.remaining_for_half_seat !== right.remaining_for_half_seat
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+const LiveTicketGrid = memo(
+  function LiveTicketGrid({
+    tickets,
+    bookingClosed,
+  }: {
+    tickets: PlayerTicket[]
+    bookingClosed: boolean
+  }) {
+    if (tickets.length === 0) {
+      return <div className="live-empty">No tickets available.</div>
+    }
+
+    return (
+      <div className="live-ticket-list">
+        {tickets.map((ticket) => (
+          <TambolaTicketCard
+            key={ticket.ticket_number}
+            ticket={ticket}
+            variant="player"
+            bookingClosed={bookingClosed}
+          />
+        ))}
+      </div>
+    )
+  },
+  (previous, next) =>
+    previous.tickets === next.tickets &&
+    previous.bookingClosed === next.bookingClosed,
+)
+
 const LiveGame = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -70,6 +124,17 @@ const LiveGame = () => {
   const [tickets, setTickets] = useState<PlayerTicket[]>([])
   const [prizes, setPrizes] = useState<PublicPrize[]>([])
   const [historyWinners, setHistoryWinners] = useState<PublicWinner[]>([])
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
+  const [winnerPopup, setWinnerPopup] = useState<{
+    visible: boolean
+    winnerName: string
+    prizeType: string
+  }>({
+    visible: false,
+    winnerName: '',
+    prizeType: '',
+  })
+  const [isNumberUiFrozen, setIsNumberUiFrozen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [theme, setTheme] = useState(getActiveTheme())
@@ -77,6 +142,16 @@ const LiveGame = () => {
   const currentGameIdRef = useRef<string>('')
   const loadRequestRef = useRef(0)
   const ticketRefreshRequestRef = useRef(0)
+  const currentNumberRef = useRef<number | null>(null)
+  const calledNumbersRef = useRef<number[]>([])
+  const winnerFreezeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const frozenDisplayRef = useRef<{
+    currentNumber: number | null
+    calledNumbers: number[]
+  }>({
+    currentNumber: null,
+    calledNumbers: [],
+  })
 
   const handleThemeToggle = () => {
     if (isThemeLocked) return
@@ -98,10 +173,7 @@ const LiveGame = () => {
   } = useGameStore((state) => state)
   const {
     announcement: bingoAnnouncement,
-    isAudioReady,
-    isSpeechSupported,
     audioBlockedMessage,
-    unlockAudio,
   } = useBingoCaller()
 
   useEffect(() => {
@@ -110,10 +182,50 @@ const LiveGame = () => {
       setIsThemeLocked(isLocked)
     })
   }, [])
-  const voiceMode = useVoiceModeStore((state) => state.mode)
-  const setVoiceMode = useVoiceModeStore((state) => state.setMode)
+
+  useEffect(() => {
+    currentNumberRef.current = currentNumber
+    calledNumbersRef.current = calledNumbers
+  }, [calledNumbers, currentNumber])
+
+  useEffect(() => {
+    return () => {
+      if (winnerFreezeTimerRef.current) {
+        window.clearTimeout(winnerFreezeTimerRef.current)
+        winnerFreezeTimerRef.current = null
+      }
+    }
+  }, [])
 
   useGameSocket(selectedGameId || undefined)
+
+  const handleWinnerAnnouncement = useCallback((winnerName: string, prizeType: string) => {
+    const prizeLabel = PRIZE_LABEL_MAP[prizeType] ?? prizeType
+    const announcement = `Congratulations ${winnerName}! You won ${prizeLabel}.`
+    void playWinnerSoundFlow(announcement, 'dramatic')
+
+    if (winnerFreezeTimerRef.current) {
+      window.clearTimeout(winnerFreezeTimerRef.current)
+      winnerFreezeTimerRef.current = null
+    }
+
+    frozenDisplayRef.current = {
+      currentNumber: currentNumberRef.current,
+      calledNumbers: calledNumbersRef.current,
+    }
+    setIsNumberUiFrozen(true)
+    setWinnerPopup({
+      visible: true,
+      winnerName,
+      prizeType,
+    })
+
+    winnerFreezeTimerRef.current = window.setTimeout(() => {
+      setIsNumberUiFrozen(false)
+      setWinnerPopup((previous) => ({ ...previous, visible: false }))
+      winnerFreezeTimerRef.current = null
+    }, 3000)
+  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -203,6 +315,9 @@ const LiveGame = () => {
     if (!selectedGameId) {
       setTickets([])
       setHistoryWinners([])
+      setLeaderboard([])
+      setWinnerPopup({ visible: false, winnerName: '', prizeType: '' })
+      setIsNumberUiFrozen(false)
       setSummary(null)
       setPrizes([])
       setLoading(false)
@@ -211,6 +326,9 @@ const LiveGame = () => {
 
     setTickets([])
     setHistoryWinners([])
+    setLeaderboard([])
+    setWinnerPopup({ visible: false, winnerName: '', prizeType: '' })
+    setIsNumberUiFrozen(false)
     setTicketsFromBackend(selectedGameId, [])
     clearWinnerQueue()
     void loadGameData(selectedGameId)
@@ -297,12 +415,41 @@ const LiveGame = () => {
       await refreshTicketsForGame(eventGameId)
     })
 
+    const unsubLeaderboardUpdate = socketManager.subscribe('LEADERBOARD_UPDATE', (event: unknown) => {
+      const payload = event as { data?: unknown }
+      const rows = Array.isArray(payload.data) ? payload.data : []
+      const nextEntries: LeaderboardEntry[] = rows
+        .map((row) => {
+          const item = row as Record<string, unknown>
+          return {
+            user_id: String(item.user_id ?? ''),
+            username: String(item.username ?? 'Player'),
+            total_marked: Number(item.total_marked ?? 0),
+            remaining_for_full_house: Number(item.remaining_for_full_house ?? 0),
+            remaining_for_half_seat: Number(item.remaining_for_half_seat ?? 0),
+          }
+        })
+        .filter((entry) => entry.user_id || entry.username)
+
+      setLeaderboard((previous) => (areLeaderboardEntriesEqual(previous, nextEntries) ? previous : nextEntries))
+    })
+
+    const unsubWinnerAnnouncement = socketManager.subscribe('WINNER_ANNOUNCEMENT', (event: unknown) => {
+      const payload = event as { winner_name?: unknown; prize_type?: unknown }
+      const winnerName = String(payload.winner_name ?? '').trim()
+      const prizeType = String(payload.prize_type ?? '').trim()
+      if (!winnerName || !prizeType) return
+      handleWinnerAnnouncement(winnerName, prizeType)
+    })
+
     return () => {
       unsubNewGame()
       unsubTicketsGenerated()
       unsubTicketBooked()
+      unsubLeaderboardUpdate()
+      unsubWinnerAnnouncement()
     }
-  }, [clearWinnerQueue, refreshTicketsForGame, setActiveTheme, setTicketsFromBackend])
+  }, [clearWinnerQueue, handleWinnerAnnouncement, refreshTicketsForGame, setActiveTheme, setTicketsFromBackend])
 
   useEffect(() => {
     if (!selectedGameId || storeGameId !== selectedGameId) return
@@ -372,8 +519,27 @@ const LiveGame = () => {
     if (summary?.game.status) return summary.game.status
     return 'CREATED'
   }, [liveStatus, summary?.game.status])
+  const isBookingClosed = useMemo(() => {
+    const gameStatus = summary?.game.status ?? selectedGame?.status ?? null
+    const bookingStatus = summary?.game.booking_status ?? selectedGame?.booking_status ?? null
+    return (
+      effectiveStatus === 'FINISHED' ||
+      effectiveStatus === 'ENDED' ||
+      gameStatus === 'FINISHED' ||
+      gameStatus === 'ENDED' ||
+      bookingStatus === 'CLOSED'
+    )
+  }, [
+    effectiveStatus,
+    selectedGame?.booking_status,
+    selectedGame?.status,
+    summary?.game.booking_status,
+    summary?.game.status,
+  ])
 
-  const calledSet = useMemo(() => new Set(calledNumbers), [calledNumbers])
+  const displayCalledNumbers = isNumberUiFrozen ? frozenDisplayRef.current.calledNumbers : calledNumbers
+  const displayCurrentNumber = isNumberUiFrozen ? frozenDisplayRef.current.currentNumber : currentNumber
+  const calledSet = useMemo(() => new Set(displayCalledNumbers), [displayCalledNumbers])
 
   const lockedPrizeSet = useMemo(() => {
     const set = new Set<string>(lockedPrizeTypes)
@@ -391,7 +557,11 @@ const LiveGame = () => {
   return (
     <main className="live-shell">
       <AnnouncementBanner gameId={selectedGameId || undefined} />
-      <WinnerCelebrationOverlay />
+      <WinnerPopup
+        visible={winnerPopup.visible}
+        winnerName={winnerPopup.winnerName}
+        prizeType={winnerPopup.prizeType}
+      />
       <section className="live-header-card">
         <div className="live-header-top">
           <h1>{selectedGame?.name || summary?.game.name || 'Live Tambola'}</h1>
@@ -439,36 +609,15 @@ const LiveGame = () => {
           </div>
           <div>
             <span>Current Number</span>
-            <strong>{currentNumber ?? '--'}</strong>
+            <strong>{displayCurrentNumber ?? '--'}</strong>
           </div>
           <div>
             <span>Called</span>
-            <strong>{calledNumbers.length}/90</strong>
+            <strong>{displayCalledNumbers.length}/90</strong>
           </div>
           <div>
             <span>Booking</span>
             <strong>{summary?.game.booking_status ?? selectedGame?.booking_status ?? '--'}</strong>
-          </div>
-        </div>
-        <div className="live-voice-control">
-          <label htmlFor="live-voice-mode">Voice mode</label>
-          <div className="live-voice-actions">
-            <select
-              id="live-voice-mode"
-              value={voiceMode}
-              onChange={(event) => setVoiceMode(event.target.value as VoiceMode)}
-            >
-              {VOICE_MODE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            {isSpeechSupported && (!isAudioReady || Boolean(audioBlockedMessage)) && (
-              <button type="button" className="ghost-btn" onClick={unlockAudio}>
-                Enable Sound
-              </button>
-            )}
           </div>
         </div>
         {(audioBlockedMessage || bingoAnnouncement) && (
@@ -481,9 +630,11 @@ const LiveGame = () => {
 
       {!loading && !error && (
         <>
+          <Leaderboard entries={leaderboard} />
+
           <section className="live-card">
             <h2>Number Board</h2>
-            <div className="live-number-board">
+            <div className={`live-number-board ${isNumberUiFrozen ? 'frozen' : ''}`}>
               {Array.from({ length: 90 }, (_, index) => {
                 const number = index + 1
                 return (
@@ -547,19 +698,7 @@ const LiveGame = () => {
 
           <section className="live-card">
             <h2>Tickets</h2>
-            {tickets.length === 0 ? (
-              <div className="live-empty">No tickets available.</div>
-            ) : (
-              <div className="live-ticket-list">
-              {tickets.map((ticket) => (
-                <TambolaTicketCard
-                  key={ticket.ticket_number}
-                  ticket={ticket}
-                  variant="player"
-                />
-              ))}
-              </div>
-            )}
+            <LiveTicketGrid tickets={tickets} bookingClosed={isBookingClosed} />
           </section>
         </>
       )}

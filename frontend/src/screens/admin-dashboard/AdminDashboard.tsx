@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { logoutCurrentUser } from '@/api/rest/auth'
 import {
   type AgentOption,
   type AdminGameListItem,
   announceGame,
+  bookTicketAsAdmin,
   confirmTicketRequest,
+  createAgent,
   createGamePrizes,
   fetchAgents,
   getCurrentAdminGame,
@@ -21,10 +24,13 @@ import {
   resetCall,
   resetTicket,
   rejectTicketRequest,
+  releaseAdminTicket,
   resumeGame,
   saveGameSettings,
   startGame,
+  updateAdminTicket,
   updateActiveTheme,
+  updateAgent,
   updateGamePrize,
   type GameBusinessSummaryResponse,
   type PrizeTypeResponse,
@@ -57,6 +63,7 @@ type SettingsForm = {
   gameDateTime: string
   totalTicketLimit: string
   ticketPrice: string
+  callingInterval: string
   agentCommission: string
   agentId: string
   bookingStatus: 'OPEN' | 'CLOSED'
@@ -77,6 +84,20 @@ type TicketBookedSocketPayload = {
   ticket_id?: string
   status?: string
   player_name?: string
+}
+
+type GameUpdateSocketPayload = {
+  game_id?: string
+  changed_fields?: Partial<AdminGameListItem> & {
+    status?: string
+    calling_interval?: number
+  }
+}
+
+type AgentEditorForm = {
+  id: string
+  name: string
+  whatsapp_number: string
 }
 
 type PosterBackgroundKey = keyof typeof wallpaperRegistry
@@ -215,9 +236,16 @@ const AdminDashboard = () => {
   const [searchKeyword, setSearchKeyword] = useState('')
   const [callingInterval, setCallingInterval] = useState<number>(10)
   const [savingSettings, setSavingSettings] = useState(false)
+  const [savingCallingInterval, setSavingCallingInterval] = useState(false)
   const [savingPrizes, setSavingPrizes] = useState(false)
+  const [savingAgent, setSavingAgent] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
   const [pendingActionTicketId, setPendingActionTicketId] = useState<string | null>(null)
   const [pendingActionType, setPendingActionType] = useState<'approve' | 'reject' | null>(null)
+  const [ticketManageActionTicketId, setTicketManageActionTicketId] = useState<string | null>(null)
+  const [ticketManageActionType, setTicketManageActionType] = useState<
+    'book' | 'edit' | 'remove' | null
+  >(null)
   const [sendingAnnouncement, setSendingAnnouncement] = useState(false)
   const [announcementText, setAnnouncementText] = useState('')
   const [showTicketCards, setShowTicketCards] = useState(false)
@@ -231,10 +259,16 @@ const AdminDashboard = () => {
     gameDateTime: '',
     totalTicketLimit: '',
     ticketPrice: '',
+    callingInterval: '10',
     agentCommission: '',
     agentId: '',
     bookingStatus: 'OPEN',
     websiteStatus: 'OPEN',
+  })
+  const [agentEditorForm, setAgentEditorForm] = useState<AgentEditorForm>({
+    id: '',
+    name: '',
+    whatsapp_number: '',
   })
   const handleThemeToggle = async () => {
     if (!gameId) {
@@ -315,6 +349,20 @@ const AdminDashboard = () => {
     { key: 'poster' as const, label: 'Poster', path: '/admin/poster' },
   ]
 
+  const handleLogout = useCallback(async () => {
+    setActionMessage('')
+    setLoggingOut(true)
+    try {
+      await logoutCurrentUser()
+      resetLiveState()
+      navigate('/admin/login', { replace: true })
+    } catch {
+      setActionMessage('Unable to logout right now. Please try again.')
+    } finally {
+      setLoggingOut(false)
+    }
+  }, [navigate, resetLiveState])
+
   // Real-time stream for called numbers and winner announcements.
   useGameSocket(gameId || undefined)
 
@@ -384,6 +432,25 @@ const AdminDashboard = () => {
       setTicketsFromBackend(selectedGameId, Array.isArray(ticketsData) ? ticketsData : [])
       setTickets(Array.isArray(ticketsData) ? ticketsData : [])
       setWinners(Array.isArray(winnersData) ? winnersData : [])
+      setGames((current) =>
+        current.map((game) =>
+          game.id === selectedGameId
+            ? {
+                ...game,
+                name: summaryData.game.name,
+                status: summaryData.game.status,
+                calling_interval: summaryData.game.calling_interval,
+                booking_status: summaryData.game.booking_status,
+                website_status: summaryData.game.website_status,
+                total_tickets: summaryData.game.total_tickets,
+                ticket_price: summaryData.game.ticket_price,
+                agent_commission: summaryData.game.agent_commission,
+                agent: summaryData.game.agent ?? null,
+                active_theme: summaryData.game.active_theme,
+              }
+            : game,
+        ),
+      )
 
       const selectedGame = games.find((item) => item.id === selectedGameId)
       setSettingsForm({
@@ -391,6 +458,13 @@ const AdminDashboard = () => {
         gameDateTime: toDateTimeLocalValue(selectedGame?.date),
         totalTicketLimit: String(summaryData.game.total_tickets ?? businessData.total_tickets),
         ticketPrice: String(summaryData.game.ticket_price ?? selectedGame?.ticket_price ?? ''),
+        callingInterval: String(
+          typeof summaryData.game.calling_interval === 'number'
+            ? summaryData.game.calling_interval
+            : typeof stateData.game.calling_interval === 'number'
+              ? stateData.game.calling_interval
+              : 10,
+        ),
         agentCommission: String(summaryData.game.agent_commission ?? businessData.agent_commission ?? 0),
         agentId: String(summaryData.game.agent?.id ?? selectedGame?.agent?.id ?? ''),
         bookingStatus: summaryData.game.booking_status === 'CLOSED' ? 'CLOSED' : 'OPEN',
@@ -522,6 +596,145 @@ const AdminDashboard = () => {
       }
     })
 
+    const handleGameUpdate = (event: unknown) => {
+      const payload = (
+        event as {
+          data?: GameUpdateSocketPayload
+        }
+      ).data
+      const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
+      if (!eventGameId) return
+
+      const changedFields = payload?.changed_fields
+      if (!changedFields || typeof changedFields !== 'object') return
+
+      setGames((current) =>
+        current.map((game) =>
+          game.id === eventGameId
+            ? {
+                ...game,
+                ...changedFields,
+                status:
+                  typeof changedFields.status === 'string'
+                    ? changedFields.status
+                    : game.status,
+              }
+            : game,
+        ),
+      )
+
+      if (!gameId || eventGameId !== gameId) return
+
+      setSummary((previous) =>
+        previous
+          ? {
+              ...previous,
+              game: {
+                ...previous.game,
+                ...changedFields,
+                status:
+                  typeof changedFields.status === 'string'
+                    ? changedFields.status
+                    : previous.game.status,
+                calling_interval:
+                  typeof changedFields.calling_interval === 'number'
+                    ? changedFields.calling_interval
+                    : previous.game.calling_interval,
+              },
+            }
+          : previous,
+      )
+
+      if (typeof changedFields.calling_interval === 'number' && changedFields.calling_interval > 0) {
+        setCallingInterval(changedFields.calling_interval)
+        setSettingsForm((state) => ({
+          ...state,
+          callingInterval: String(changedFields.calling_interval),
+        }))
+      }
+      if (typeof changedFields.booking_status === 'string') {
+        setSettingsForm((state) => ({
+          ...state,
+          bookingStatus: changedFields.booking_status === 'CLOSED' ? 'CLOSED' : 'OPEN',
+        }))
+      }
+      if (typeof changedFields.website_status === 'string') {
+        setSettingsForm((state) => ({
+          ...state,
+          websiteStatus: changedFields.website_status === 'CLOSED' ? 'CLOSED' : 'OPEN',
+        }))
+      }
+      const updatedGameName = changedFields.name
+      if (typeof updatedGameName === 'string') {
+        setSettingsForm((state) => ({
+          ...state,
+          gameName: updatedGameName,
+        }))
+      }
+      if (typeof changedFields.active_theme === 'string' && changedFields.active_theme) {
+        setAdminTheme(changedFields.active_theme)
+      }
+    }
+    const unsubGameUpdate = socketManager.subscribe('game_update', handleGameUpdate)
+    const unsubGameUpdateUpper = socketManager.subscribe('GAME_UPDATE', handleGameUpdate)
+
+    const unsubGameStarted = socketManager.subscribe('game.started', (event: unknown) => {
+      if (!gameId) return
+      const payload = event as { calling_interval?: unknown }
+      const nextCallingInterval =
+        typeof payload.calling_interval === 'number' && payload.calling_interval > 0
+          ? payload.calling_interval
+          : undefined
+
+      setGames((current) =>
+        current.map((game) =>
+          game.id === gameId
+            ? {
+                ...game,
+                status: 'RUNNING',
+                calling_interval: nextCallingInterval ?? game.calling_interval,
+              }
+            : game,
+        ),
+      )
+
+      setSummary((previous) =>
+        previous
+          ? {
+              ...previous,
+              game: {
+                ...previous.game,
+                status: 'RUNNING',
+                calling_interval: nextCallingInterval ?? previous.game.calling_interval,
+              },
+            }
+          : previous,
+      )
+
+      if (nextCallingInterval) {
+        setCallingInterval(nextCallingInterval)
+        setSettingsForm((state) => ({ ...state, callingInterval: String(nextCallingInterval) }))
+      }
+    })
+
+    const unsubGameFinished = socketManager.subscribe('game.finished', () => {
+      if (!gameId) return
+      setGames((current) =>
+        current.map((game) => (game.id === gameId ? { ...game, status: 'FINISHED' } : game)),
+      )
+      setSummary((previous) =>
+        previous
+          ? {
+              ...previous,
+              game: {
+                ...previous.game,
+                status: 'FINISHED',
+              },
+            }
+          : previous,
+      )
+    })
+
     const unsubTicketsGenerated = socketManager.subscribe('tickets_generated', async (event: unknown) => {
       const payload = (event as { data?: { game_id?: string } }).data
       const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
@@ -579,6 +792,10 @@ const AdminDashboard = () => {
 
     return () => {
       unsubNewGame()
+      unsubGameUpdate()
+      unsubGameUpdateUpper()
+      unsubGameStarted()
+      unsubGameFinished()
       unsubTicketsGenerated()
       unsubTicketBooked()
     }
@@ -686,6 +903,132 @@ const AdminDashboard = () => {
     setBusiness(freshBusiness)
   }, [setTicketsFromBackend])
 
+  const promptTicketAssignment = (
+    defaults: { playerName?: string; playerPhone?: string } = {},
+  ): { playerName: string; playerPhone: string } | null => {
+    const defaultName = defaults.playerName?.trim() ?? ''
+    const defaultPhone = defaults.playerPhone?.trim() ?? ''
+    const nameInput = window.prompt('Enter player name', defaultName)
+    if (nameInput === null) return null
+    const playerName = nameInput.trim()
+    if (!playerName) {
+      setActionMessage('Player name is required.')
+      return null
+    }
+
+    const phoneInput = window.prompt('Enter player WhatsApp/phone', defaultPhone)
+    if (phoneInput === null) return null
+    const playerPhone = phoneInput.trim()
+    if (!playerPhone) {
+      setActionMessage('Player phone is required.')
+      return null
+    }
+
+    return { playerName, playerPhone }
+  }
+
+  const handleBookAvailableTicket = async (ticket: TicketResponse) => {
+    if (!gameId) return
+    if (normalizeTicketStatus(ticket.status) !== 'AVAILABLE') {
+      setActionMessage('Only available tickets can be booked directly.')
+      return
+    }
+
+    const assignment = promptTicketAssignment({
+      playerName: ticket.requested_by_name ?? '',
+      playerPhone: ticket.requested_by_whatsapp ?? '',
+    })
+    if (!assignment) return
+
+    setTicketManageActionTicketId(ticket.id ?? `ticket-${ticket.ticket_number}`)
+    setTicketManageActionType('book')
+    setActionMessage('')
+    try {
+      await bookTicketAsAdmin({
+        game_id: gameId,
+        ticket_number: ticket.ticket_number,
+        booking_mode: 'RANDOM',
+        player_name: assignment.playerName,
+        player_phone: assignment.playerPhone,
+      })
+      await refreshTicketsAndBusiness(gameId)
+      setSearchKeyword('')
+      setActionMessage(`Ticket ${ticket.ticket_number} booked for ${assignment.playerName}.`)
+    } catch (bookError) {
+      setActionMessage(getErrorMessage(bookError))
+    } finally {
+      setTicketManageActionTicketId(null)
+      setTicketManageActionType(null)
+    }
+  }
+
+  const handleEditTicketAssignment = async (ticket: TicketResponse) => {
+    if (!gameId) return
+    if (!ticket.id) {
+      setActionMessage('Ticket id is missing for this request. Refresh and try again.')
+      return
+    }
+    if (normalizeTicketStatus(ticket.status) === 'AVAILABLE') {
+      setActionMessage('Only booked or pending tickets can be modified.')
+      return
+    }
+
+    const assignment = promptTicketAssignment({
+      playerName: ticket.player_name ?? ticket.requested_by_name ?? '',
+      playerPhone: ticket.player_phone ?? ticket.requested_by_whatsapp ?? '',
+    })
+    if (!assignment) return
+
+    setTicketManageActionTicketId(ticket.id)
+    setTicketManageActionType('edit')
+    setActionMessage('')
+    try {
+      await updateAdminTicket(ticket.id, {
+        player_name: assignment.playerName,
+        player_phone: assignment.playerPhone,
+      })
+      await refreshTicketsAndBusiness(gameId)
+      setSearchKeyword('')
+      setActionMessage(`Ticket ${ticket.ticket_number} updated.`)
+    } catch (editError) {
+      setActionMessage(getErrorMessage(editError))
+    } finally {
+      setTicketManageActionTicketId(null)
+      setTicketManageActionType(null)
+    }
+  }
+
+  const handleReleaseTicket = async (ticket: TicketResponse) => {
+    if (!gameId) return
+    if (!ticket.id) {
+      setActionMessage('Ticket id is missing for this request. Refresh and try again.')
+      return
+    }
+    if (normalizeTicketStatus(ticket.status) === 'AVAILABLE') {
+      setActionMessage('Ticket is already available.')
+      return
+    }
+    const proceed = window.confirm(
+      `Remove booking and release ticket ${ticket.ticket_number} back to available?`,
+    )
+    if (!proceed) return
+
+    setTicketManageActionTicketId(ticket.id)
+    setTicketManageActionType('remove')
+    setActionMessage('')
+    try {
+      await releaseAdminTicket(ticket.id)
+      await refreshTicketsAndBusiness(gameId)
+      setSearchKeyword('')
+      setActionMessage(`Ticket ${ticket.ticket_number} released.`)
+    } catch (releaseError) {
+      setActionMessage(getErrorMessage(releaseError))
+    } finally {
+      setTicketManageActionTicketId(null)
+      setTicketManageActionType(null)
+    }
+  }
+
   const handleApprovePendingRequest = async (ticket: TicketResponse) => {
     if (!gameId) return
     if (!ticket.id) {
@@ -732,42 +1075,183 @@ const AdminDashboard = () => {
     }
   }
 
-  const handleSettingsSave = async () => {
-    setSavingSettings(true)
-    setActionMessage('')
-    try {
-      const createdGame = await saveGameSettings({
+  const buildSettingsPayload = useCallback(
+    (intervalOverride?: number) => {
+      const parsedInterval = Number(
+        intervalOverride ?? Number(settingsForm.callingInterval || callingInterval || 10),
+      )
+      const normalizedCallingInterval =
+        Number.isFinite(parsedInterval) && parsedInterval > 0 ? Math.floor(parsedInterval) : 10
+
+      return {
         name: settingsForm.gameName.trim(),
         date: settingsForm.gameDateTime,
         total_tickets: Number(settingsForm.totalTicketLimit),
         ticket_price: Number(settingsForm.ticketPrice),
+        calling_interval: normalizedCallingInterval,
         agent_commission: Number(settingsForm.agentCommission || 0),
         agent_id: settingsForm.agentId ? Number(settingsForm.agentId) : null,
         booking_status: settingsForm.bookingStatus,
         website_status: settingsForm.websiteStatus,
-      })
-
-      // New game creation flow: switch context to the newly created game.
-      const [latestGames, currentGame] = await Promise.all([
-        listAdminGames(),
-        getCurrentAdminGame(),
-      ])
-      setGames(latestGames)
-      resetLiveState()
-
-      if (currentGame?.id) {
-        setGameId(currentGame.id)
-        navigate(`/admin?gameId=${currentGame.id}`, { replace: true })
-      } else if (createdGame?.id) {
-        setGameId(createdGame.id)
-        navigate(`/admin?gameId=${createdGame.id}`, { replace: true })
       }
+    },
+    [callingInterval, settingsForm],
+  )
 
-      setActionMessage('New game created from game settings.')
+  const applyCallingIntervalRealtime = useCallback(
+    async (nextInterval: number) => {
+      if (!gameId || !summary || summary.game.status !== 'RUNNING') return
+
+      setSavingCallingInterval(true)
+      setActionMessage('')
+      try {
+        const updatedGame = await saveGameSettings({
+          ...buildSettingsPayload(nextInterval),
+          game_id: gameId,
+        })
+
+        setGames((current) =>
+          current.map((game) => (game.id === gameId ? { ...game, ...updatedGame } : game)),
+        )
+        setSummary((previous) =>
+          previous
+            ? {
+                ...previous,
+                game: {
+                  ...previous.game,
+                  calling_interval:
+                    typeof (updatedGame as { calling_interval?: unknown })?.calling_interval === 'number'
+                      ? Number((updatedGame as { calling_interval: number }).calling_interval)
+                      : nextInterval,
+                },
+              }
+            : previous,
+        )
+        setActionMessage(`Calling interval updated live to ${nextInterval}s.`)
+      } catch (errorValue) {
+        setActionMessage(getErrorMessage(errorValue))
+        const currentInterval = summary?.game.calling_interval
+        if (typeof currentInterval === 'number' && currentInterval > 0) {
+          setCallingInterval(currentInterval)
+          setSettingsForm((state) => ({ ...state, callingInterval: String(currentInterval) }))
+        }
+      } finally {
+        setSavingCallingInterval(false)
+      }
+    },
+    [buildSettingsPayload, gameId, summary],
+  )
+
+  const handleCallingIntervalSelect = (nextIntervalValue: number) => {
+    if (!Number.isFinite(nextIntervalValue) || nextIntervalValue <= 0) return
+    const nextInterval = Math.floor(nextIntervalValue)
+    if (nextInterval === callingInterval) return
+
+    setCallingInterval(nextInterval)
+    setSettingsForm((state) => ({ ...state, callingInterval: String(nextInterval) }))
+
+    if (summary?.game.status === 'RUNNING') {
+      void applyCallingIntervalRealtime(nextInterval)
+    }
+  }
+
+  const handleSettingsSave = async () => {
+    setSavingSettings(true)
+    setActionMessage('')
+    try {
+      const payload = buildSettingsPayload()
+
+      if (!isSetupMode && gameId) {
+        const updatedGame = await saveGameSettings({
+          ...payload,
+          game_id: gameId,
+        })
+
+        setGames((current) =>
+          current.map((game) => (game.id === gameId ? { ...game, ...updatedGame } : game)),
+        )
+        await rehydrateGameState(gameId)
+        setActionMessage('Game settings updated.')
+      } else {
+        const createdGame = await saveGameSettings(payload)
+
+        // New game creation flow: switch context to the newly created game.
+        const [latestGames, currentGame] = await Promise.all([
+          listAdminGames(),
+          getCurrentAdminGame(),
+        ])
+        setGames(latestGames)
+        resetLiveState()
+
+        if (currentGame?.id) {
+          setGameId(currentGame.id)
+          navigate(`/admin?gameId=${currentGame.id}`, { replace: true })
+        } else if (createdGame?.id) {
+          setGameId(createdGame.id)
+          navigate(`/admin?gameId=${createdGame.id}`, { replace: true })
+        }
+
+        setActionMessage('New game created from game settings.')
+      }
     } catch (saveError) {
       setActionMessage(getErrorMessage(saveError))
     } finally {
       setSavingSettings(false)
+    }
+  }
+
+  const handleAgentEditorSelect = (nextId: string) => {
+    if (!nextId) {
+      setAgentEditorForm({
+        id: '',
+        name: '',
+        whatsapp_number: '',
+      })
+      return
+    }
+    const selected = agents.find((agent) => String(agent.id) === nextId)
+    setAgentEditorForm({
+      id: nextId,
+      name: selected?.name ?? '',
+      whatsapp_number: selected?.whatsapp_number ?? '',
+    })
+  }
+
+  const handleSaveAgent = async () => {
+    const name = agentEditorForm.name.trim()
+    const whatsappNumber = agentEditorForm.whatsapp_number.trim()
+    if (!name || !whatsappNumber) {
+      setActionMessage('Enter agent name and WhatsApp number.')
+      return
+    }
+
+    setSavingAgent(true)
+    setActionMessage('')
+    try {
+      const savedAgent = agentEditorForm.id
+        ? await updateAgent({
+            id: Number(agentEditorForm.id),
+            name,
+            whatsapp_number: whatsappNumber,
+          })
+        : await createAgent({
+            name,
+            whatsapp_number: whatsappNumber,
+          })
+
+      const fetchedAgents = await fetchAgents()
+      const nextAgents = Array.isArray(fetchedAgents) ? fetchedAgents : []
+      setAgents(nextAgents)
+      setAgentEditorForm({
+        id: String(savedAgent.id),
+        name: savedAgent.name,
+        whatsapp_number: savedAgent.whatsapp_number,
+      })
+      setActionMessage(agentEditorForm.id ? 'Agent updated.' : 'Agent added.')
+    } catch (saveError) {
+      setActionMessage(getErrorMessage(saveError))
+    } finally {
+      setSavingAgent(false)
     }
   }
 
@@ -1081,6 +1565,7 @@ const AdminDashboard = () => {
       gameDateTime: '',
       totalTicketLimit: '',
       ticketPrice: '',
+      callingInterval: '10',
       agentCommission: '',
       agentId: '',
       bookingStatus: 'OPEN',
@@ -1216,6 +1701,14 @@ const AdminDashboard = () => {
           <button type="button" className="secondary-btn" onClick={handleThemeToggle}>
             Theme: {formatThemeLabel(theme)}
           </button>
+          <button
+            type="button"
+            className="secondary-btn admin-logout-btn"
+            onClick={() => void handleLogout()}
+            disabled={loggingOut}
+          >
+            {loggingOut ? 'Logging out...' : 'Logout'}
+          </button>
         </div>
       </header>
 
@@ -1297,111 +1790,195 @@ const AdminDashboard = () => {
       </section>
 
       {showOverview && (
-        <section className="admin-card">
-          <h2>Game Settings</h2>
-          <div className="form-grid">
-            <label>
-              Game name
-              <input
-                type="text"
-                value={settingsForm.gameName}
-                onChange={(event) =>
-                  setSettingsForm((state) => ({ ...state, gameName: event.target.value }))
-                }
-                maxLength={255}
-              />
-            </label>
-            <label>
-              Game date-time
-              <input
-                type="datetime-local"
-                value={settingsForm.gameDateTime}
-                onChange={(event) =>
-                  setSettingsForm((state) => ({ ...state, gameDateTime: event.target.value }))
-                }
-              />
-            </label>
-            <label>
-              Total ticket limit
-              <input
-                type="number"
-                value={settingsForm.totalTicketLimit}
-                onChange={(event) =>
-                  setSettingsForm((state) => ({ ...state, totalTicketLimit: event.target.value }))
-                }
-              />
-            </label>
-            <label>
-              Ticket price
-              <input
-                type="number"
-                value={settingsForm.ticketPrice}
-                onChange={(event) =>
-                  setSettingsForm((state) => ({ ...state, ticketPrice: event.target.value }))
-                }
-              />
-            </label>
-            <label>
-              Agent commission
-              <input
-                type="number"
-                value={settingsForm.agentCommission}
-                onChange={(event) =>
-                  setSettingsForm((state) => ({ ...state, agentCommission: event.target.value }))
-                }
-              />
-            </label>
-            <label>
-              Agent
-              <select
-                value={settingsForm.agentId}
-                onChange={(event) =>
-                  setSettingsForm((state) => ({ ...state, agentId: event.target.value }))
-                }
+        <>
+          <section className="admin-card">
+            <h2>Game Settings</h2>
+            <div className="form-grid">
+              <label>
+                Game name
+                <input
+                  type="text"
+                  value={settingsForm.gameName}
+                  onChange={(event) =>
+                    setSettingsForm((state) => ({ ...state, gameName: event.target.value }))
+                  }
+                  maxLength={255}
+                />
+              </label>
+              <label>
+                Game date-time
+                <input
+                  type="datetime-local"
+                  value={settingsForm.gameDateTime}
+                  onChange={(event) =>
+                    setSettingsForm((state) => ({ ...state, gameDateTime: event.target.value }))
+                  }
+                />
+              </label>
+              <label>
+                Total ticket limit
+                <input
+                  type="number"
+                  value={settingsForm.totalTicketLimit}
+                  onChange={(event) =>
+                    setSettingsForm((state) => ({ ...state, totalTicketLimit: event.target.value }))
+                  }
+                />
+              </label>
+              <label>
+                Ticket price
+                <input
+                  type="number"
+                  value={settingsForm.ticketPrice}
+                  onChange={(event) =>
+                    setSettingsForm((state) => ({ ...state, ticketPrice: event.target.value }))
+                  }
+                />
+              </label>
+              <label>
+                Calling interval (seconds)
+                <input
+                  type="number"
+                  min={1}
+                  value={settingsForm.callingInterval}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setSettingsForm((state) => ({ ...state, callingInterval: value }))
+                    const parsed = Number(value)
+                    if (Number.isFinite(parsed) && parsed > 0) {
+                      setCallingInterval(Math.floor(parsed))
+                    }
+                  }}
+                />
+              </label>
+              <label>
+                Agent commission
+                <input
+                  type="number"
+                  value={settingsForm.agentCommission}
+                  onChange={(event) =>
+                    setSettingsForm((state) => ({ ...state, agentCommission: event.target.value }))
+                  }
+                />
+              </label>
+              <label>
+                Agent
+                <select
+                  value={settingsForm.agentId}
+                  onChange={(event) =>
+                    setSettingsForm((state) => ({ ...state, agentId: event.target.value }))
+                  }
+                >
+                  <option value="">Select Agent</option>
+                  {agents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name} ({agent.whatsapp_number})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Booking status
+                <select
+                  value={settingsForm.bookingStatus}
+                  onChange={(event) =>
+                    setSettingsForm((state) => ({
+                      ...state,
+                      bookingStatus: event.target.value as SettingsForm['bookingStatus'],
+                    }))
+                  }
+                >
+                  <option value="OPEN">OPEN</option>
+                  <option value="CLOSED">CLOSED</option>
+                </select>
+              </label>
+              <label>
+                Website status
+                <select
+                  value={settingsForm.websiteStatus}
+                  onChange={(event) =>
+                    setSettingsForm((state) => ({
+                      ...state,
+                      websiteStatus: event.target.value as SettingsForm['websiteStatus'],
+                    }))
+                  }
+                >
+                  <option value="OPEN">OPEN</option>
+                  <option value="CLOSED">CLOSED</option>
+                </select>
+              </label>
+            </div>
+            <button onClick={handleSettingsSave} disabled={savingSettings} className="primary-btn">
+              {savingSettings ? 'Saving...' : 'Save Game Settings'}
+            </button>
+          </section>
+
+          <section className="admin-card">
+            <h2>Agent Manager</h2>
+            <div className="form-grid">
+              <label>
+                Existing agent
+                <select
+                  value={agentEditorForm.id}
+                  onChange={(event) => handleAgentEditorSelect(event.target.value)}
+                >
+                  <option value="">Add New Agent</option>
+                  {agents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name} ({agent.whatsapp_number})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Agent name
+                <input
+                  type="text"
+                  value={agentEditorForm.name}
+                  onChange={(event) =>
+                    setAgentEditorForm((state) => ({ ...state, name: event.target.value }))
+                  }
+                  maxLength={100}
+                />
+              </label>
+              <label>
+                WhatsApp number
+                <input
+                  type="text"
+                  value={agentEditorForm.whatsapp_number}
+                  onChange={(event) =>
+                    setAgentEditorForm((state) => ({ ...state, whatsapp_number: event.target.value }))
+                  }
+                  placeholder="+919876543210"
+                />
+              </label>
+            </div>
+            <div className="agent-manager-actions">
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={() => void handleSaveAgent()}
+                disabled={savingAgent || !agentEditorForm.name.trim() || !agentEditorForm.whatsapp_number.trim()}
               >
-                <option value="">Select Agent</option>
-                {agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name} ({agent.whatsapp_number})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Booking status
-              <select
-                value={settingsForm.bookingStatus}
-                onChange={(event) =>
-                  setSettingsForm((state) => ({
-                    ...state,
-                    bookingStatus: event.target.value as SettingsForm['bookingStatus'],
-                  }))
+                {savingAgent ? 'Saving...' : agentEditorForm.id ? 'Update Agent' : 'Add Agent'}
+              </button>
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() =>
+                  setAgentEditorForm({
+                    id: '',
+                    name: '',
+                    whatsapp_number: '',
+                  })
                 }
+                disabled={savingAgent}
               >
-                <option value="OPEN">OPEN</option>
-                <option value="CLOSED">CLOSED</option>
-              </select>
-            </label>
-            <label>
-              Website status
-              <select
-                value={settingsForm.websiteStatus}
-                onChange={(event) =>
-                  setSettingsForm((state) => ({
-                    ...state,
-                    websiteStatus: event.target.value as SettingsForm['websiteStatus'],
-                  }))
-                }
-              >
-                <option value="OPEN">OPEN</option>
-                <option value="CLOSED">CLOSED</option>
-              </select>
-            </label>
-          </div>
-          <button onClick={handleSettingsSave} disabled={savingSettings} className="primary-btn">
-            {savingSettings ? 'Saving...' : 'Save Game Settings'}
-          </button>
-        </section>
+                Clear
+              </button>
+            </div>
+          </section>
+        </>
       )}
 
       {showPrizeView && (
@@ -1581,7 +2158,8 @@ const AdminDashboard = () => {
             <div>
               <select
                 value={callingInterval}
-                onChange={(event) => setCallingInterval(Number(event.target.value))}
+                onChange={(event) => handleCallingIntervalSelect(Number(event.target.value))}
+                disabled={savingCallingInterval}
               >
                 {[1, 2, 5, 10, 12, 15, 20, 30].map((interval) => (
                   <option key={interval} value={interval}>
@@ -1597,6 +2175,9 @@ const AdminDashboard = () => {
               {runControlLabel}
             </button>
           </div>
+          {running && savingCallingInterval && (
+            <p className="prize-setup-hint">Updating calling interval...</p>
+          )}
           {!running && runControlNeedsEnabledPrize && !hasEnabledPrize && (
             <p className="prize-setup-hint">
               Start/Resume is blocked until at least one configured prize is enabled.
@@ -1778,24 +2359,97 @@ const AdminDashboard = () => {
                     <th>Phone</th>
                     <th>Status</th>
                     <th>Type</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredTickets.map((ticket) => (
-                    <tr key={ticket.ticket_number}>
-                      <td>{ticket.ticket_number}</td>
-                      <td>{ticket.player_name ?? '-'}</td>
-                      <td>{ticket.player_phone ?? '-'}</td>
-                    <td>
-                      {normalizeTicketStatus(ticket.status) === 'CONFIRMED' && ticket.player_name
-                        ? `CONFIRMED : ${ticket.player_name}`
-                        : normalizeTicketStatus(ticket.status) === 'PENDING' && ticket.requested_by_name
-                          ? `PENDING : ${ticket.requested_by_name}`
-                          : normalizeTicketStatus(ticket.status)}
-                    </td>
-                      <td>{ticket.ticket_type}</td>
-                    </tr>
-                  ))}
+                  {filteredTickets.map((ticket) => {
+                    const ticketStatus = normalizeTicketStatus(ticket.status)
+                    const ticketActionId = ticket.id ?? `ticket-${ticket.ticket_number}`
+                    const rowActionBusy =
+                      ticketManageActionTicketId === ticketActionId ||
+                      (Boolean(ticket.id) && pendingActionTicketId === ticket.id)
+                    const bookingActionBusy = rowActionBusy && ticketManageActionType === 'book'
+                    const editActionBusy = rowActionBusy && ticketManageActionType === 'edit'
+                    const removeActionBusy = rowActionBusy && ticketManageActionType === 'remove'
+                    const approving =
+                      Boolean(ticket.id) &&
+                      pendingActionType === 'approve' &&
+                      pendingActionTicketId === ticket.id
+                    const rejecting =
+                      Boolean(ticket.id) &&
+                      pendingActionType === 'reject' &&
+                      pendingActionTicketId === ticket.id
+
+                    return (
+                      <tr key={ticket.ticket_number}>
+                        <td>{ticket.ticket_number}</td>
+                        <td>{ticket.player_name ?? '-'}</td>
+                        <td>{ticket.player_phone ?? '-'}</td>
+                        <td>
+                          {ticketStatus === 'CONFIRMED' && ticket.player_name
+                            ? `CONFIRMED : ${ticket.player_name}`
+                            : ticketStatus === 'PENDING' && ticket.requested_by_name
+                              ? `PENDING : ${ticket.requested_by_name}`
+                              : ticketStatus}
+                        </td>
+                        <td>{ticket.ticket_type}</td>
+                        <td>
+                          <div className="ticket-manage-actions">
+                            {ticketStatus === 'AVAILABLE' ? (
+                              <button
+                                type="button"
+                                className="approve-btn"
+                                onClick={() => void handleBookAvailableTicket(ticket)}
+                                disabled={rowActionBusy}
+                              >
+                                {bookingActionBusy ? 'Booking...' : 'Book'}
+                              </button>
+                            ) : (
+                              <>
+                                {ticketStatus === 'PENDING' ? (
+                                  <button
+                                    type="button"
+                                    className="approve-btn"
+                                    onClick={() => void handleApprovePendingRequest(ticket)}
+                                    disabled={!ticket.id || rowActionBusy}
+                                  >
+                                    {approving ? 'Approving...' : 'Approve'}
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className="approve-btn"
+                                  onClick={() => void handleEditTicketAssignment(ticket)}
+                                  disabled={!ticket.id || rowActionBusy}
+                                >
+                                  {editActionBusy ? 'Saving...' : 'Edit'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="reject-btn"
+                                  onClick={() =>
+                                    ticketStatus === 'PENDING'
+                                      ? void handleRejectPendingRequest(ticket)
+                                      : void handleReleaseTicket(ticket)
+                                  }
+                                  disabled={!ticket.id || rowActionBusy}
+                                >
+                                  {ticketStatus === 'PENDING'
+                                    ? rejecting
+                                      ? 'Rejecting...'
+                                      : 'Reject'
+                                    : removeActionBusy
+                                      ? 'Removing...'
+                                      : 'Remove'}
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

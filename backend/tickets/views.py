@@ -13,6 +13,7 @@ from games.models import Game
 from .models import Ticket
 from .serializers import (
     AdminBulkTicketGenerateSerializer,
+    AdminTicketAssignmentSerializer,
     AdminTicketBookingSerializer,
     TicketBookingStatusSerializer,
     TicketRequestBookingSerializer,
@@ -368,6 +369,102 @@ class AdminRejectBookingView(APIView):
                 ]
             )
 
+        return Response(_ticket_payload(ticket))
+
+
+class AdminUpdateTicketView(APIView):
+    permission_classes = [IsAdminRole]
+    authentication_classes = [SessionAuthentication]
+
+    def post(self, request, ticket_id):
+        serializer = AdminTicketAssignmentSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+
+        with transaction.atomic():
+            try:
+                ticket = (
+                    Ticket.objects.select_for_update()
+                    .select_related("game")
+                    .get(id=ticket_id)
+                )
+            except Ticket.DoesNotExist:
+                return Response({"detail": "Ticket not found."}, status=404)
+
+            game = ticket.game
+            if game.status == Game.Status.FINISHED:
+                return Response({"detail": "Cannot modify tickets after game is FINISHED."}, status=400)
+            if game.booking_status != Game.BookingStatus.OPEN:
+                return Response({"detail": "Ticket booking is closed for this game."}, status=400)
+            if ticket.status == Ticket.Status.AVAILABLE:
+                return Response({"detail": "Only booked or pending tickets can be modified."}, status=400)
+
+            update_fields = [
+                "status",
+                "player_name",
+                "player_phone",
+                "requested_by_name",
+                "requested_by_whatsapp",
+                "requested_at",
+            ]
+            ticket.status = Ticket.Status.CONFIRMED
+            ticket.player_name = serializer.validated_data["player_name"]
+            ticket.player_phone = serializer.validated_data["player_phone"]
+            ticket.requested_by_name = None
+            ticket.requested_by_whatsapp = None
+            ticket.requested_at = None
+            if ticket.booked_at is None:
+                ticket.booked_at = timezone.now()
+                update_fields.append("booked_at")
+            ticket.save(update_fields=update_fields)
+
+        _broadcast_ticket_booked(game, ticket)
+        return Response(_ticket_payload(ticket))
+
+
+class AdminReleaseTicketView(APIView):
+    permission_classes = [IsAdminRole]
+    authentication_classes = [SessionAuthentication]
+
+    def post(self, request, ticket_id):
+        with transaction.atomic():
+            try:
+                ticket = (
+                    Ticket.objects.select_for_update()
+                    .select_related("game")
+                    .get(id=ticket_id)
+                )
+            except Ticket.DoesNotExist:
+                return Response({"detail": "Ticket not found."}, status=404)
+
+            game = ticket.game
+            if game.status == Game.Status.FINISHED:
+                return Response({"detail": "Cannot modify tickets after game is FINISHED."}, status=400)
+            if game.booking_status != Game.BookingStatus.OPEN:
+                return Response({"detail": "Ticket booking is closed for this game."}, status=400)
+
+            ticket.status = Ticket.Status.AVAILABLE
+            ticket.player_name = None
+            ticket.player_phone = None
+            ticket.booked_at = None
+            ticket.requested_by_name = None
+            ticket.requested_by_whatsapp = None
+            ticket.requested_at = None
+            ticket.ticket_type = Ticket.TicketType.RANDOM
+            ticket.save(
+                update_fields=[
+                    "status",
+                    "player_name",
+                    "player_phone",
+                    "booked_at",
+                    "requested_by_name",
+                    "requested_by_whatsapp",
+                    "requested_at",
+                    "ticket_type",
+                ]
+            )
+
+        _broadcast_ticket_booked(game, ticket)
         return Response(_ticket_payload(ticket))
 
 

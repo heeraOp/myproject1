@@ -59,12 +59,50 @@ def check_prize_condition(prize_type, game):
     called_numbers = set(game.called_numbers.values_list("number", flat=True))
     tickets = list(game.tickets.filter(status=Ticket.Status.CONFIRMED).order_by("ticket_number"))
 
+    if prize_key in ("HALF_SHEET", "FULL_SHEET"):
+        required_ticket_count = 3 if prize_key == "HALF_SHEET" else 6
+
+        def _ticket_has_marked_number(ticket):
+            rows = ticket.ticket_data.get("rows") if isinstance(ticket.ticket_data, dict) else []
+            if not isinstance(rows, list):
+                return False
+            for row in rows:
+                if not isinstance(row, list):
+                    continue
+                for number in row:
+                    if number is not None and number in called_numbers:
+                        return True
+            return False
+
+        player_ticket_groups = {}
+        for ticket in tickets:
+            player_phone = (ticket.player_phone or "").strip()
+            player_name = (ticket.player_name or "").strip()
+            if player_phone:
+                group_key = ("phone", player_phone)
+            elif player_name:
+                group_key = ("name", player_name.lower())
+            else:
+                continue
+            player_ticket_groups.setdefault(group_key, []).append(ticket)
+
+        qualifying_winning_tickets = []
+        for player_tickets in player_ticket_groups.values():
+            if len(player_tickets) != required_ticket_count:
+                continue
+            if not all(_ticket_has_marked_number(ticket) for ticket in player_tickets):
+                continue
+            qualifying_winning_tickets.append(min(player_tickets, key=lambda item: item.ticket_number))
+
+        if not qualifying_winning_tickets:
+            return None
+
+        return min(qualifying_winning_tickets, key=lambda item: item.ticket_number)
+
     mapping = {
         "FIRST_HOUSE": validators.validate_full_house,
         "SECOND_HOUSE": validators.validate_full_house,
         "THIRD_HOUSE": validators.validate_full_house,
-        "FULL_SHEET": validators.validate_full_house,
-        "HALF_SHEET": validators.validate_half_sheet,
         "TOP_LINE": lambda data, called: _validate_specific_line(data, called, 0),
         "MIDDLE_LINE": lambda data, called: _validate_specific_line(data, called, 1),
         "BOTTOM_LINE": lambda data, called: _validate_specific_line(data, called, 2),
@@ -157,6 +195,14 @@ def evaluate_claims_for_game(game):
                         "prize_name": getattr(winner.prize, "name", winner.prize.prize_type),
                         "winner_name": winner.username or winner.ticket.player_name or "",
                         "timestamp": timezone.now().isoformat(),
+                    },
+                )
+                async_to_sync(channel_layer.group_send)(
+                    group_name,
+                    {
+                        "type": "winner_announcement",
+                        "winner_name": winner.username or winner.ticket.player_name or "Player",
+                        "prize_type": winner.prize.prize_type,
                     },
                 )
                 print("Winner broadcast SUCCESS")
