@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import AnnouncementBanner from '@/components/common/AnnouncementBanner'
 import { fetchCurrentPublicGame } from '@/api/rest/games'
 import {
@@ -44,7 +44,6 @@ const PRIZE_LABEL_MAP: Record<string, string> = {
 const GameFinished = () => {
   const navigate = useNavigate()
   const location = useLocation()
-  const [searchParams] = useSearchParams()
   const [games, setGames] = useState<PublicGame[]>([])
   const [selectedGameId, setSelectedGameId] = useState('')
   const [summary, setSummary] = useState<PublicGameSummary | null>(null)
@@ -96,7 +95,7 @@ const GameFinished = () => {
     return () => {
       mounted = false
     }
-  }, [searchParams, setActiveTheme])
+  }, [setActiveTheme])
 
   useEffect(() => {
     let mounted = true

@@ -1,4 +1,9 @@
 import { REST_BASE_URL } from '@/config'
+import {
+  initGlobalAudioUnlock,
+  playAudioElementSafely,
+  resumeGlobalAudioContext,
+} from '@/utils/audioEngine'
 
 export type VoiceType = 'normal' | 'savage' | 'funny' | 'dramatic'
 
@@ -25,8 +30,10 @@ let musicAudio: HTMLAudioElement | null = null
 let musicFadeTimer: number | null = null
 
 let effectAudio: HTMLAudioElement | null = null
-let winnerSequenceToken = 0
+let winnerSoundFlowQueue: Promise<void> = Promise.resolve()
+let winnerSoundFlowActiveCount = 0
 let effectContext: AudioContext | null = null
+const SPEECH_PLAYBACK_RATE = 0.8
 
 const normalizeBaseUrl = (value: string): string => value.replace(/\/+$/, '')
 
@@ -214,11 +221,14 @@ export const stopSpeaking = () => {
   clearSpeechObjectUrl()
 }
 
+export const isWinnerSoundFlowActive = (): boolean => winnerSoundFlowActiveCount > 0
+
 export const speakText = async (inputText: string, voiceType: VoiceType = 'normal'): Promise<boolean> => {
   const text = String(inputText || '').trim()
   if (!text) return false
   if (typeof window === 'undefined') return false
 
+  initGlobalAudioUnlock()
   stopSpeaking()
 
   const controller = new AbortController()
@@ -240,6 +250,7 @@ export const speakText = async (inputText: string, voiceType: VoiceType = 'norma
     speechObjectUrl = objectUrl
 
     const audio = new Audio(objectUrl)
+    audio.playbackRate = SPEECH_PLAYBACK_RATE
     speechAudio = audio
 
     const finalize = () => {
@@ -252,6 +263,11 @@ export const speakText = async (inputText: string, voiceType: VoiceType = 'norma
     audio.onended = finalize
     audio.onerror = finalize
 
+    const unlocked = await resumeGlobalAudioContext()
+    if (!unlocked) {
+      finalize()
+      return false
+    }
     await audio.play()
     return true
   } catch {
@@ -268,6 +284,7 @@ export const playMusic = async (
   options: MusicOptions = {},
 ): Promise<boolean> => {
   if (typeof window === 'undefined') return false
+  initGlobalAudioUnlock()
 
   const loop = options.loop ?? true
   const targetVolume = clampVolume(options.volume ?? 0.25)
@@ -286,7 +303,8 @@ export const playMusic = async (
   audio.volume = fadeInMs > 0 ? 0 : targetVolume
 
   try {
-    await audio.play()
+    const played = await playAudioElementSafely(audio)
+    if (!played) return false
     musicAudio = audio
     if (fadeInMs > 0) {
       fadeAudioVolume(audio, 0, targetVolume, fadeInMs, () => {})
@@ -326,6 +344,7 @@ export const playEffect = async (
   options: EffectOptions = {},
 ): Promise<boolean> => {
   if (typeof window === 'undefined') return false
+  initGlobalAudioUnlock()
   const interrupt = options.interrupt ?? true
 
   if (interrupt && effectAudio) {
@@ -339,7 +358,8 @@ export const playEffect = async (
   audio.volume = clampVolume(options.volume ?? 1)
 
   try {
-    await audio.play()
+    const played = await playAudioElementSafely(audio)
+    if (!played) return false
     effectAudio = audio
     audio.onended = () => {
       if (effectAudio === audio) {
@@ -360,27 +380,32 @@ export const playEffect = async (
   }
 }
 
-export const playWinnerSoundFlow = async (
+export const playWinnerSoundFlow = (
   winnerAnnouncementText: string,
   voiceType: VoiceType = 'dramatic',
 ): Promise<void> => {
-  if (typeof window === 'undefined') return
+  if (typeof window === 'undefined') return Promise.resolve()
 
-  winnerSequenceToken += 1
-  const token = winnerSequenceToken
+  const run = async () => {
+    winnerSoundFlowActiveCount += 1
+    try {
+      const drumrollPlayed = await playEffect('/sounds/drumroll.mp3', { volume: 1, interrupt: true })
+      if (!drumrollPlayed) {
+        await playDrumrollFallback(2000)
+      }
+      await wait(2000)
 
-  const drumrollPlayed = await playEffect('/sounds/drumroll.mp3', { volume: 1, interrupt: true })
-  if (!drumrollPlayed) {
-    await playDrumrollFallback(2000)
+      await speakText(winnerAnnouncementText, voiceType)
+
+      const applausePlayed = await playEffect('/sounds/applause.mp3', { volume: 1, interrupt: true })
+      if (!applausePlayed) {
+        await playApplauseFallback(1300)
+      }
+    } finally {
+      winnerSoundFlowActiveCount = Math.max(0, winnerSoundFlowActiveCount - 1)
+    }
   }
-  await wait(2000)
-  if (token !== winnerSequenceToken) return
 
-  await speakText(winnerAnnouncementText, voiceType)
-  if (token !== winnerSequenceToken) return
-
-  const applausePlayed = await playEffect('/sounds/applause.mp3', { volume: 1, interrupt: true })
-  if (!applausePlayed) {
-    await playApplauseFallback(1300)
-  }
+  winnerSoundFlowQueue = winnerSoundFlowQueue.catch(() => undefined).then(run)
+  return winnerSoundFlowQueue
 }

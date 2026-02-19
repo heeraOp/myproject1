@@ -5,5 +5,6 @@ export {
   stopMusic,
   playEffect,
   playWinnerSoundFlow,
+  isWinnerSoundFlowActive,
   type VoiceType,
 } from '@/utils/soundManager'

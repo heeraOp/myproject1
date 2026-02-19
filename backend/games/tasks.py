@@ -28,7 +28,7 @@ def auto_call_numbers(game_id):
     def finish_game_if_needed() -> bool:
         """
         Canonical finish check.
-        - Game already marked FINISHED (e.g. by claim evaluator)
+        - Game already marked FINISHED
         - All 90 numbers exhausted
         Returns True if game should stop.
         """

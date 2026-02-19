@@ -330,6 +330,22 @@
   margin-bottom: 12px;
 }
 
+.calling-interval-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.calling-interval-control select {
+  border: 2px solid var(--color-0a0e3d);
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-weight: 700;
+  min-width: 92px;
+}
+
 .voice-mode-control {
   display: grid;
   gap: 6px;

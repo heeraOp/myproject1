@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { socketManager } from '@/api/websocket/socketManager'
 import { useAnnouncementStore } from '@/app/store/announcement.store'
 import { useGameStore } from '@/app/store/game.store'
+import { type VoiceMode, useVoiceModeStore } from '@/app/store/voiceMode.store'
 import { REST_BASE_URL } from '@/config'
 
 type GameStartedEvent = {
@@ -49,6 +50,11 @@ type AnnouncementEvent = {
   timestamp: string
   game_id: string
   announcement_id?: number
+}
+
+type VoiceModeUpdateEvent = {
+  type: 'VOICE_MODE_UPDATE'
+  voice_mode: VoiceMode
 }
 
 type EngineSocketEvent = GameStartedEvent | NumberCalledEvent | GameFinishedEvent | WinnerAnnouncedEvent
@@ -116,11 +122,28 @@ const isWinnerBroadcastEvent = (payload: unknown): payload is WinnerBroadcastEve
   )
 }
 
+const isVoiceMode = (value: unknown): value is VoiceMode =>
+  value === 'CLASSIC' ||
+  value === 'FUNNY' ||
+  value === 'CRAZY' ||
+  value === 'MALE_DEEP' ||
+  value === 'MALE_ENERGETIC' ||
+  value === 'FUNNY_CARTOON' ||
+  value === 'FUNNY_COMEDIC' ||
+  value === 'FUNNY_CRAZY'
+
+const isVoiceModeUpdateEvent = (payload: unknown): payload is VoiceModeUpdateEvent => {
+  if (!payload || typeof payload !== 'object') return false
+  const event = payload as Record<string, unknown>
+  return event.type === 'VOICE_MODE_UPDATE' && isVoiceMode(event.voice_mode)
+}
+
 export const useGameSocket = (gameId?: string): void => {
   const applyBackendEvent = useGameStore((state) => state.applyBackendEvent)
   const replaceFromBackendState = useGameStore((state) => state.replaceFromBackendState)
   const enqueueWinnerAnnouncement = useGameStore((state) => state.enqueueWinnerAnnouncement)
   const addAnnouncement = useAnnouncementStore((state) => state.addAnnouncement)
+  const setVoiceMode = useVoiceModeStore((state) => state.setMode)
   const toInteger = (value: string | number): number | null => {
     if (typeof value === 'number' && Number.isInteger(value)) return value
     const parsed = Number.parseInt(String(value), 10)
@@ -157,12 +180,19 @@ export const useGameSocket = (gameId?: string): void => {
       })
     }
 
-    enqueueWinnerAnnouncement({
-      id: `winner-${String(event.id)}`,
-      winner_name: event.winnerName.trim() || 'Player',
-      prize_name: event.prizeName.trim() || 'Prize',
-      ticket_number: resolvedTicketNumber ?? null,
-    })
+    const winnerAnnouncementId = `winner-${String(event.id)}`
+    const storeState = useGameStore.getState()
+    const alreadyQueued = storeState.winnerQueue.some((item) => item.id === winnerAnnouncementId)
+    const alreadyKnownWinner =
+      winnerId !== null && storeState.winners.some((winner) => winner.id === winnerId)
+    if (!alreadyQueued && !alreadyKnownWinner) {
+      enqueueWinnerAnnouncement({
+        id: winnerAnnouncementId,
+        winner_name: event.winnerName.trim() || 'Player',
+        prize_name: event.prizeName.trim() || 'Prize',
+        ticket_number: resolvedTicketNumber ?? null,
+      })
+    }
   }
 
   useEffect(() => {
@@ -236,6 +266,10 @@ export const useGameSocket = (gameId?: string): void => {
           timestamp: event.timestamp,
         })
       }),
+      socketManager.subscribe('VOICE_MODE_UPDATE', (event: unknown) => {
+        if (!isVoiceModeUpdateEvent(event)) return
+        setVoiceMode(event.voice_mode)
+      }),
       socketManager.on('reconnect', () => {
         void recoverState()
       }),
@@ -247,5 +281,12 @@ export const useGameSocket = (gameId?: string): void => {
       unsubs.forEach((unsubscribe) => unsubscribe())
       socketManager.disconnect()
     }
-  }, [gameId, applyBackendEvent, replaceFromBackendState, enqueueWinnerAnnouncement, addAnnouncement])
+  }, [
+    gameId,
+    applyBackendEvent,
+    replaceFromBackendState,
+    enqueueWinnerAnnouncement,
+    addAnnouncement,
+    setVoiceMode,
+  ])
 }

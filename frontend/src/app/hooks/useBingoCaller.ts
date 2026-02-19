@@ -9,7 +9,7 @@ import {
   unlockAudioFromUserGesture,
 } from '@/utils/audioEngine'
 import { getBingoCallText } from '@/utils/bingoCalls'
-import { speakText, stopSpeaking, type VoiceType } from '@/utils/speakText'
+import { isWinnerSoundFlowActive, speakText, stopSpeaking, type VoiceType } from '@/utils/speakText'
 import { resolveSpeechConfig } from '@/voices/voiceRegistry'
 
 type BingoCallerState = {
@@ -20,6 +20,10 @@ type BingoCallerState = {
   isSpeechSupported: boolean
   audioBlockedMessage: string | null
   unlockAudio: () => void
+}
+
+type UseBingoCallerOptions = {
+  soundEnabled?: boolean
 }
 
 type PendingSpeechAnnouncement = {
@@ -40,7 +44,7 @@ const resolveVoiceTypeForMode = (mode: VoiceMode): VoiceType => {
   return 'normal'
 }
 
-export const useBingoCaller = (): BingoCallerState => {
+export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = {}): BingoCallerState => {
   const status = useGameStore((state) => state.status)
   const calledNumbers = useGameStore((state) => state.calledNumbers)
   const voiceMode = useVoiceModeStore((state) => state.mode)
@@ -112,12 +116,20 @@ export const useBingoCaller = (): BingoCallerState => {
   }, [])
 
   useEffect(() => {
+    if (soundEnabled) return
+    pendingSpeechRef.current = null
+    setAudioBlockedMessage(null)
+    stopSpeaking()
+  }, [soundEnabled])
+
+  useEffect(() => {
     if (!audioUnlocked) return
+    if (!soundEnabled) return
     if (!pendingSpeechRef.current) return
     const pending = pendingSpeechRef.current
     pendingSpeechRef.current = null
     void speakAnnouncement(pending.number, pending.text, pending.voiceMode)
-  }, [audioUnlocked, speakAnnouncement])
+  }, [audioUnlocked, soundEnabled, speakAnnouncement])
 
   useEffect(() => {
     if (!initializedRef.current) {
@@ -155,8 +167,12 @@ export const useBingoCaller = (): BingoCallerState => {
     setAnnouncement(text)
     setAnnouncementNumber(calledNumber)
 
-    if (!audioUnlocked) {
+    if (!soundEnabled) {
+      pendingSpeechRef.current = null
+    } else if (!audioUnlocked) {
       pendingSpeechRef.current = { number: calledNumber, text, voiceMode }
+    } else if (isWinnerSoundFlowActive()) {
+      pendingSpeechRef.current = null
     } else {
       void (async () => {
         const played = await speakAnnouncement(calledNumber, text, voiceMode)
@@ -174,7 +190,7 @@ export const useBingoCaller = (): BingoCallerState => {
       setAnnouncement('')
       setAnnouncementNumber(null)
     }, 3000)
-  }, [audioUnlocked, calledNumbers, speakAnnouncement, status, voiceMode])
+  }, [audioUnlocked, calledNumbers, soundEnabled, speakAnnouncement, status, voiceMode])
 
   useEffect(() => {
     return () => {

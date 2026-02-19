@@ -249,6 +249,10 @@ const AdminDashboard = () => {
   const [sendingAnnouncement, setSendingAnnouncement] = useState(false)
   const [announcementText, setAnnouncementText] = useState('')
   const [showTicketCards, setShowTicketCards] = useState(false)
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true
+    return window.localStorage.getItem('housie_admin_sound_enabled') !== '0'
+  })
   const [theme, setTheme] = useState(getActiveTheme())
   const [posterBackgroundKey, setPosterBackgroundKey] = useState<PosterBackgroundKey>(() =>
     resolveWallpaperTheme(getActiveTheme()),
@@ -296,6 +300,12 @@ const AdminDashboard = () => {
   const ticketSectionRef = useRef<HTMLElement | null>(null)
   const winnerSectionRef = useRef<HTMLElement | null>(null)
   const businessSectionRef = useRef<HTMLElement | null>(null)
+  const gamesRef = useRef<AdminGameListItem[]>([])
+  const activeGameIdRef = useRef<string>('')
+  const gameStatusRef = useRef<string>('CREATED')
+  const winnerPauseQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const winnerPauseProcessedRef = useRef<Set<string>>(new Set())
+  const winnerPauseInitializedRef = useRef(false)
 
   const {
     gameId: storeGameId,
@@ -315,7 +325,7 @@ const AdminDashboard = () => {
     isSpeechSupported,
     audioBlockedMessage,
     unlockAudio,
-  } = useBingoCaller()
+  } = useBingoCaller({ soundEnabled })
   const voiceMode = useVoiceModeStore((state) => state.mode)
   const setVoiceMode = useVoiceModeStore((state) => state.setMode)
   const normalizedPath = location.pathname.replace(/\/+$/, '')
@@ -365,6 +375,37 @@ const AdminDashboard = () => {
 
   // Real-time stream for called numbers and winner announcements.
   useGameSocket(gameId || undefined)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('housie_admin_sound_enabled', soundEnabled ? '1' : '0')
+  }, [soundEnabled])
+
+  useEffect(() => {
+    gamesRef.current = games
+  }, [games])
+
+  useEffect(() => {
+    activeGameIdRef.current = gameId
+  }, [gameId])
+
+  useEffect(() => {
+    const statusFromSummary = summary?.game.status
+    if (typeof statusFromSummary === 'string' && statusFromSummary.length > 0) {
+      gameStatusRef.current = statusFromSummary
+      return
+    }
+    if (liveStatus === 'RUNNING' || liveStatus === 'FINISHED') {
+      gameStatusRef.current = liveStatus
+      return
+    }
+    gameStatusRef.current = 'CREATED'
+  }, [liveStatus, summary?.game.status])
+
+  useEffect(() => {
+    winnerPauseProcessedRef.current.clear()
+    winnerPauseInitializedRef.current = false
+  }, [gameId])
 
   useEffect(() => {
     let mounted = true
@@ -452,7 +493,7 @@ const AdminDashboard = () => {
         ),
       )
 
-      const selectedGame = games.find((item) => item.id === selectedGameId)
+      const selectedGame = gamesRef.current.find((item) => item.id === selectedGameId)
       setSettingsForm({
         gameName: String(summaryData.game.name ?? selectedGame?.name ?? ''),
         gameDateTime: toDateTimeLocalValue(selectedGame?.date),
@@ -473,7 +514,7 @@ const AdminDashboard = () => {
 
       return summaryData
     },
-    [games, replaceFromBackendState, setTicketsFromBackend],
+    [replaceFromBackendState, setTicketsFromBackend],
   )
 
   const loadAll = useCallback(
@@ -812,6 +853,65 @@ const AdminDashboard = () => {
     })
   }, [winners, liveWinners])
 
+  useEffect(() => {
+    if (!gameId) return
+
+    if (!winnerPauseInitializedRef.current) {
+      mergedWinners.forEach((winner) => {
+        const winnerKey = winner.id
+          ? `id:${winner.id}`
+          : `fallback:${winner.prize_type}:${winner.ticket_number}:${winner.player_name ?? ''}`
+        winnerPauseProcessedRef.current.add(winnerKey)
+      })
+      winnerPauseInitializedRef.current = true
+      return
+    }
+
+    const pendingWinnerKeys: string[] = []
+    mergedWinners.forEach((winner) => {
+      const winnerKey = winner.id
+        ? `id:${winner.id}`
+        : `fallback:${winner.prize_type}:${winner.ticket_number}:${winner.player_name ?? ''}`
+      if (winnerPauseProcessedRef.current.has(winnerKey)) return
+      winnerPauseProcessedRef.current.add(winnerKey)
+      pendingWinnerKeys.push(winnerKey)
+    })
+
+    if (pendingWinnerKeys.length === 0) return
+
+    pendingWinnerKeys.forEach(() => {
+      const queuedGameId = gameId
+      winnerPauseQueueRef.current = winnerPauseQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          if (!queuedGameId) return
+          if (activeGameIdRef.current !== queuedGameId) return
+          if (gameStatusRef.current !== 'RUNNING') return
+
+          try {
+            await pauseGame(queuedGameId)
+            gameStatusRef.current = 'PAUSED'
+          } catch {
+            return
+          }
+
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, 3000)
+          })
+
+          if (activeGameIdRef.current !== queuedGameId) return
+          if (gameStatusRef.current !== 'PAUSED') return
+
+          try {
+            await resumeGame(queuedGameId)
+            gameStatusRef.current = 'RUNNING'
+          } catch {
+            return
+          }
+        })
+    })
+  }, [gameId, mergedWinners])
+
   const calledNumbers = liveCalledNumbers
   const totalTicketsValue =
     business && business.total_tickets > 0
@@ -832,6 +932,7 @@ const AdminDashboard = () => {
 
   const running = effectiveStatus === 'RUNNING'
   const finished = effectiveStatus === 'FINISHED'
+  const bookingActionsDisabled = running || finished
   const allNumbersCalled = calledNumbers.length >= 90 || summary?.game.status === 'FINISHED'
   const configuredPrizeCount = prizes.length
   const enabledPrizeCount = prizes.filter((prize) => prize.enabled).length
@@ -929,6 +1030,10 @@ const AdminDashboard = () => {
 
   const handleBookAvailableTicket = async (ticket: TicketResponse) => {
     if (!gameId) return
+    if (bookingActionsDisabled) {
+      setActionMessage('Ticket booking actions are disabled while the game is running or finished.')
+      return
+    }
     if (normalizeTicketStatus(ticket.status) !== 'AVAILABLE') {
       setActionMessage('Only available tickets can be booked directly.')
       return
@@ -964,6 +1069,10 @@ const AdminDashboard = () => {
 
   const handleEditTicketAssignment = async (ticket: TicketResponse) => {
     if (!gameId) return
+    if (bookingActionsDisabled) {
+      setActionMessage('Ticket booking actions are disabled while the game is running or finished.')
+      return
+    }
     if (!ticket.id) {
       setActionMessage('Ticket id is missing for this request. Refresh and try again.')
       return
@@ -1000,6 +1109,10 @@ const AdminDashboard = () => {
 
   const handleReleaseTicket = async (ticket: TicketResponse) => {
     if (!gameId) return
+    if (bookingActionsDisabled) {
+      setActionMessage('Ticket booking actions are disabled while the game is running or finished.')
+      return
+    }
     if (!ticket.id) {
       setActionMessage('Ticket id is missing for this request. Refresh and try again.')
       return
@@ -1031,6 +1144,10 @@ const AdminDashboard = () => {
 
   const handleApprovePendingRequest = async (ticket: TicketResponse) => {
     if (!gameId) return
+    if (bookingActionsDisabled) {
+      setActionMessage('Ticket booking actions are disabled while the game is running or finished.')
+      return
+    }
     if (!ticket.id) {
       setActionMessage('Ticket id is missing for this request. Refresh and try again.')
       return
@@ -1054,6 +1171,10 @@ const AdminDashboard = () => {
 
   const handleRejectPendingRequest = async (ticket: TicketResponse) => {
     if (!gameId) return
+    if (bookingActionsDisabled) {
+      setActionMessage('Ticket booking actions are disabled while the game is running or finished.')
+      return
+    }
     if (!ticket.id) {
       setActionMessage('Ticket id is missing for this request. Refresh and try again.')
       return
@@ -1098,63 +1219,6 @@ const AdminDashboard = () => {
     [callingInterval, settingsForm],
   )
 
-  const applyCallingIntervalRealtime = useCallback(
-    async (nextInterval: number) => {
-      if (!gameId || !summary || summary.game.status !== 'RUNNING') return
-
-      setSavingCallingInterval(true)
-      setActionMessage('')
-      try {
-        const updatedGame = await saveGameSettings({
-          ...buildSettingsPayload(nextInterval),
-          game_id: gameId,
-        })
-
-        setGames((current) =>
-          current.map((game) => (game.id === gameId ? { ...game, ...updatedGame } : game)),
-        )
-        setSummary((previous) =>
-          previous
-            ? {
-                ...previous,
-                game: {
-                  ...previous.game,
-                  calling_interval:
-                    typeof (updatedGame as { calling_interval?: unknown })?.calling_interval === 'number'
-                      ? Number((updatedGame as { calling_interval: number }).calling_interval)
-                      : nextInterval,
-                },
-              }
-            : previous,
-        )
-        setActionMessage(`Calling interval updated live to ${nextInterval}s.`)
-      } catch (errorValue) {
-        setActionMessage(getErrorMessage(errorValue))
-        const currentInterval = summary?.game.calling_interval
-        if (typeof currentInterval === 'number' && currentInterval > 0) {
-          setCallingInterval(currentInterval)
-          setSettingsForm((state) => ({ ...state, callingInterval: String(currentInterval) }))
-        }
-      } finally {
-        setSavingCallingInterval(false)
-      }
-    },
-    [buildSettingsPayload, gameId, summary],
-  )
-
-  const handleCallingIntervalSelect = (nextIntervalValue: number) => {
-    if (!Number.isFinite(nextIntervalValue) || nextIntervalValue <= 0) return
-    const nextInterval = Math.floor(nextIntervalValue)
-    if (nextInterval === callingInterval) return
-
-    setCallingInterval(nextInterval)
-    setSettingsForm((state) => ({ ...state, callingInterval: String(nextInterval) }))
-
-    if (summary?.game.status === 'RUNNING') {
-      void applyCallingIntervalRealtime(nextInterval)
-    }
-  }
-
   const handleSettingsSave = async () => {
     setSavingSettings(true)
     setActionMessage('')
@@ -1197,6 +1261,54 @@ const AdminDashboard = () => {
       setActionMessage(getErrorMessage(saveError))
     } finally {
       setSavingSettings(false)
+    }
+  }
+
+  const handleSetCallingInterval = async () => {
+    if (!gameId || !summary) return
+    const nextInterval =
+      Number.isFinite(callingInterval) && callingInterval > 0 ? Math.floor(callingInterval) : 10
+
+    setSavingCallingInterval(true)
+    setActionMessage('')
+    try {
+      const updatedGame = await saveGameSettings({
+        ...buildSettingsPayload(nextInterval),
+        game_id: gameId,
+      })
+
+      const updatedInterval =
+        typeof (updatedGame as { calling_interval?: unknown })?.calling_interval === 'number' &&
+        (updatedGame as { calling_interval: number }).calling_interval > 0
+          ? Math.floor((updatedGame as { calling_interval: number }).calling_interval)
+          : nextInterval
+
+      setCallingInterval(updatedInterval)
+      setSettingsForm((state) => ({ ...state, callingInterval: String(updatedInterval) }))
+      setGames((current) =>
+        current.map((game) =>
+          game.id === gameId
+            ? { ...game, ...updatedGame, calling_interval: updatedInterval }
+            : game,
+        ),
+      )
+      setSummary((previous) =>
+        previous
+          ? {
+              ...previous,
+              game: {
+                ...previous.game,
+                ...updatedGame,
+                calling_interval: updatedInterval,
+              },
+            }
+          : previous,
+      )
+      setActionMessage(`Calling interval set to ${updatedInterval}s.`)
+    } catch (errorValue) {
+      setActionMessage(getErrorMessage(errorValue))
+    } finally {
+      setSavingCallingInterval(false)
     }
   }
 
@@ -1268,7 +1380,7 @@ const AdminDashboard = () => {
         .map((row) => ({
           prize_type: row.prize_type,
           amount: Math.max(0, Number(row.amount) || 0),
-          enabled: Boolean(row.enabled),
+          enabled: true,
         }))
 
       if (newPrizePayload.length > 0) {
@@ -1282,7 +1394,7 @@ const AdminDashboard = () => {
         patchRequests.push(
           updateGamePrize(gameId, row.prize_type, {
             amount: Math.max(0, Number(row.amount) || 0),
-            enabled: Boolean(row.enabled),
+            enabled: true,
           }),
         )
       })
@@ -1527,7 +1639,13 @@ const AdminDashboard = () => {
     setActionMessage('')
     try {
       if (summary.game.status === 'CREATED') {
-        await startGame(gameId, callingInterval)
+        const intervalFromSummary =
+          Number.isFinite(callingInterval) && callingInterval > 0
+            ? Math.floor(callingInterval)
+            : typeof summary.game.calling_interval === 'number' && summary.game.calling_interval > 0
+              ? summary.game.calling_interval
+              : 10
+        await startGame(gameId, intervalFromSummary)
       } else if (summary.game.status === 'RUNNING') {
         await pauseGame(gameId)
       } else if (summary.game.status === 'PAUSED') {
@@ -1836,22 +1954,6 @@ const AdminDashboard = () => {
                 />
               </label>
               <label>
-                Calling interval (seconds)
-                <input
-                  type="number"
-                  min={1}
-                  value={settingsForm.callingInterval}
-                  onChange={(event) => {
-                    const value = event.target.value
-                    setSettingsForm((state) => ({ ...state, callingInterval: value }))
-                    const parsed = Number(value)
-                    if (Number.isFinite(parsed) && parsed > 0) {
-                      setCallingInterval(Math.floor(parsed))
-                    }
-                  }}
-                />
-              </label>
-              <label>
                 Agent commission
                 <input
                   type="number"
@@ -2009,14 +2111,13 @@ const AdminDashboard = () => {
                   <th>Configure</th>
                   <th>Prize type</th>
                   <th>Amount</th>
-                  <th>Enabled</th>
                   <th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {editablePrizes.length === 0 ? (
                   <tr>
-                    <td colSpan={5}>{prizeTypesLoading ? 'Loading prize types...' : 'No prize types found.'}</td>
+                    <td colSpan={4}>{prizeTypesLoading ? 'Loading prize types...' : 'No prize types found.'}</td>
                   </tr>
                 ) : (
                   editablePrizes.map((prize) => (
@@ -2033,7 +2134,7 @@ const AdminDashboard = () => {
                                   ? {
                                       ...item,
                                       configured: event.target.checked,
-                                      enabled: event.target.checked ? item.enabled : false,
+                                      enabled: event.target.checked,
                                     }
                                   : item,
                               ),
@@ -2058,22 +2159,6 @@ const AdminDashboard = () => {
                               ),
                             )
                           }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={prize.enabled}
-                          disabled={!prize.configured || !canEditPrizeConfig || prize.claimed}
-                          onChange={(event) =>
-                            setEditablePrizes((state) =>
-                              state.map((item) =>
-                                item.prize_type === prize.prize_type
-                                  ? { ...item, enabled: event.target.checked }
-                                  : item,
-                              ),
-                            )
-                          }
                         />
                       </td>
                       <td>
@@ -2133,7 +2218,15 @@ const AdminDashboard = () => {
               <select
                 id="admin-voice-mode"
                 value={voiceMode}
-                onChange={(event) => setVoiceMode(event.target.value as VoiceMode)}
+                onChange={(event) => {
+                  const nextMode = event.target.value as VoiceMode
+                  setVoiceMode(nextMode)
+                  if (!gameId) return
+                  socketManager.send({
+                    type: 'voice_mode_update',
+                    voice_mode: nextMode,
+                  })
+                }}
               >
                 {VOICE_MODE_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -2141,7 +2234,22 @@ const AdminDashboard = () => {
                   </option>
                 ))}
               </select>
-              {isSpeechSupported && (!isAudioReady || Boolean(audioBlockedMessage)) && (
+              <button
+                type="button"
+                className="secondary-btn voice-unlock-btn"
+                onClick={() =>
+                  setSoundEnabled((previous) => {
+                    const next = !previous
+                    if (next) {
+                      void unlockAudio()
+                    }
+                    return next
+                  })
+                }
+              >
+                Sound: {soundEnabled ? 'ON' : 'OFF'}
+              </button>
+              {soundEnabled && isSpeechSupported && (!isAudioReady || Boolean(audioBlockedMessage)) && (
                 <button type="button" className="secondary-btn voice-unlock-btn" onClick={unlockAudio}>
                   Enable Sound
                 </button>
@@ -2156,17 +2264,33 @@ const AdminDashboard = () => {
             <div>{running ? 'ON' : 'OFF'}</div>
             <div>Calling interval</div>
             <div>
-              <select
-                value={callingInterval}
-                onChange={(event) => handleCallingIntervalSelect(Number(event.target.value))}
-                disabled={savingCallingInterval}
-              >
-                {[1, 2, 5, 10, 12, 15, 20, 30].map((interval) => (
-                  <option key={interval} value={interval}>
-                    {interval}s
-                  </option>
-                ))}
-              </select>
+              <div className="calling-interval-control">
+                <select
+                  value={String(callingInterval)}
+                  onChange={(event) => {
+                    const next = Number(event.target.value)
+                    if (!Number.isFinite(next) || next <= 0) return
+                    const safe = Math.floor(next)
+                    setCallingInterval(safe)
+                    setSettingsForm((state) => ({ ...state, callingInterval: String(safe) }))
+                  }}
+                  disabled={!gameId || !summary || finished || savingCallingInterval}
+                >
+                  {[2, 3, 4, 5, 7, 10, 12, 15, 20].map((option) => (
+                    <option key={option} value={option}>
+                      {option}s
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => void handleSetCallingInterval()}
+                  disabled={!gameId || !summary || finished || savingCallingInterval}
+                >
+                  {savingCallingInterval ? 'Setting...' : 'Set'}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2175,9 +2299,6 @@ const AdminDashboard = () => {
               {runControlLabel}
             </button>
           </div>
-          {running && savingCallingInterval && (
-            <p className="prize-setup-hint">Updating calling interval...</p>
-          )}
           {!running && runControlNeedsEnabledPrize && !hasEnabledPrize && (
             <p className="prize-setup-hint">
               Start/Resume is blocked until at least one configured prize is enabled.
@@ -2317,7 +2438,7 @@ const AdminDashboard = () => {
                                 type="button"
                                 className="approve-btn"
                                 onClick={() => void handleApprovePendingRequest(ticket)}
-                                disabled={!ticket.id || approving || rejecting}
+                                disabled={!ticket.id || approving || rejecting || bookingActionsDisabled}
                               >
                                 {approving ? 'Approving...' : 'Approve'}
                               </button>
@@ -2325,7 +2446,7 @@ const AdminDashboard = () => {
                                 type="button"
                                 className="reject-btn"
                                 onClick={() => void handleRejectPendingRequest(ticket)}
-                                disabled={!ticket.id || approving || rejecting}
+                                disabled={!ticket.id || approving || rejecting || bookingActionsDisabled}
                               >
                                 {rejecting ? 'Rejecting...' : 'Reject'}
                               </button>
@@ -2401,7 +2522,7 @@ const AdminDashboard = () => {
                                 type="button"
                                 className="approve-btn"
                                 onClick={() => void handleBookAvailableTicket(ticket)}
-                                disabled={rowActionBusy}
+                                disabled={rowActionBusy || bookingActionsDisabled}
                               >
                                 {bookingActionBusy ? 'Booking...' : 'Book'}
                               </button>
@@ -2412,7 +2533,7 @@ const AdminDashboard = () => {
                                     type="button"
                                     className="approve-btn"
                                     onClick={() => void handleApprovePendingRequest(ticket)}
-                                    disabled={!ticket.id || rowActionBusy}
+                                    disabled={!ticket.id || rowActionBusy || bookingActionsDisabled}
                                   >
                                     {approving ? 'Approving...' : 'Approve'}
                                   </button>
@@ -2421,7 +2542,7 @@ const AdminDashboard = () => {
                                   type="button"
                                   className="approve-btn"
                                   onClick={() => void handleEditTicketAssignment(ticket)}
-                                  disabled={!ticket.id || rowActionBusy}
+                                  disabled={!ticket.id || rowActionBusy || bookingActionsDisabled}
                                 >
                                   {editActionBusy ? 'Saving...' : 'Edit'}
                                 </button>
@@ -2433,7 +2554,7 @@ const AdminDashboard = () => {
                                       ? void handleRejectPendingRequest(ticket)
                                       : void handleReleaseTicket(ticket)
                                   }
-                                  disabled={!ticket.id || rowActionBusy}
+                                  disabled={!ticket.id || rowActionBusy || bookingActionsDisabled}
                                 >
                                   {ticketStatus === 'PENDING'
                                     ? rejecting

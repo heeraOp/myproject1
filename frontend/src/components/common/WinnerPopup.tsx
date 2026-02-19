@@ -7,6 +7,7 @@ type WinnerPopupProps = {
   visible: boolean
   winnerName: string
   prizeType: string
+  enableSound?: boolean
 }
 
 const PRIZE_LABEL_MAP: Record<string, string> = {
@@ -31,7 +32,7 @@ const toPrizeLabel = (value: string): string => {
   return PRIZE_LABEL_MAP[key] || value || 'Prize'
 }
 
-const WinnerPopup = ({ visible, winnerName, prizeType }: WinnerPopupProps) => {
+const WinnerPopup = ({ visible, winnerName, prizeType, enableSound = true }: WinnerPopupProps) => {
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
@@ -52,12 +53,12 @@ const WinnerPopup = ({ visible, winnerName, prizeType }: WinnerPopupProps) => {
       colors: ['#ff2d2d', '#ffd54f', '#ffffff', '#35d76f'],
     })
 
-    if (audioRef.current) {
+    if (enableSound && audioRef.current) {
       audioRef.current.pause()
       audioRef.current.currentTime = 0
       void playAudioElementSafely(audioRef.current)
     }
-  }, [visible, winnerName, prizeType])
+  }, [enableSound, visible, winnerName, prizeType])
 
   if (!visible) return null
 

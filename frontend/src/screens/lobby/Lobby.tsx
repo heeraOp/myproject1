@@ -13,6 +13,7 @@ import { useGameSocket } from '@/app/hooks/useGameSocket'
 import { useGameStore } from '@/app/store/game.store'
 import type { PublicGame } from '@/types/backend/game'
 import { normalizeTicketStatus, type PlayerTicket } from '@/types/backend/ticket'
+import { initGlobalAudioUnlock, unlockAudioFromUserGesture } from '@/utils/audioEngine'
 import { setAdminTheme } from '@/utils/theme'
 import { formatDateInIST, formatTimeInIST } from '@/utils/dateTime'
 import { playMusic, speakText, stopMusic } from '@/utils/speakText'
@@ -29,8 +30,33 @@ type SupportContact = {
 
 const normalizeWhatsAppNumber = (value: string): string => value.replace(/\D/g, '')
 const hasValidCountryCode = (digits: string): boolean => /^[1-9]\d{10,14}$/.test(digits)
-const PRE_GAME_ANNOUNCEMENT_TEXT =
-  'Attention players! The game will begin shortly. Please get ready!'
+const PRE_GAME_ANNOUNCEMENTS: ReadonlyArray<{ thresholdMs: number; message: string; id: string }> = [
+  {
+    thresholdMs: 120000,
+    id: '120',
+    message: 'Attention players! The game will begin in about 2 minutes. Please get ready.',
+  },
+  {
+    thresholdMs: 90000,
+    id: '090',
+    message: 'Players, only about 90 seconds left. Please keep your tickets ready.',
+  },
+  {
+    thresholdMs: 60000,
+    id: '060',
+    message: 'One minute to go. Get ready for the live number calling.',
+  },
+  {
+    thresholdMs: 30000,
+    id: '030',
+    message: 'Only 30 seconds left. Final call to get ready.',
+  },
+  {
+    thresholdMs: 10000,
+    id: '010',
+    message: 'Game starts in a few seconds. Best of luck to all players.',
+  },
+]
 
 const toLobbyGameStatus = (status: string | undefined): PublicGame['status'] => {
   if (status === 'FINISHED' || status === 'ENDED') return 'ENDED'
@@ -72,11 +98,18 @@ const Lobby = () => {
   const [bookingPlayerPhone, setBookingPlayerPhone] = useState(playerPhone ?? '')
   const [bookingInProgress, setBookingInProgress] = useState(false)
   const [requestingTicketNumber, setRequestingTicketNumber] = useState<number | null>(null)
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true
+    return window.localStorage.getItem('housie_player_sound_enabled') !== '0'
+  })
 
   const currentGameIdRef = useRef<string>('')
   const ticketFetchRequestRef = useRef(0)
   const businessFetchRequestRef = useRef(0)
-  const preGameAnnouncementKeyRef = useRef<string>('')
+  const preGameAnnouncementLogRef = useRef<Set<string>>(new Set())
+  const preGameMusicKeyRef = useRef<string>('')
+  const preGameLastAttemptAtRef = useRef<number>(0)
+  const hasAutoEnteredLiveRef = useRef(false)
 
   const {
     gameId: storeGameId,
@@ -89,6 +122,15 @@ const Lobby = () => {
   useEffect(() => {
     setBookingPlayerPhone(playerPhone ?? '')
   }, [playerPhone])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('housie_player_sound_enabled', soundEnabled ? '1' : '0')
+  }, [soundEnabled])
+
+  useEffect(() => {
+    initGlobalAudioUnlock()
+  }, [])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -161,7 +203,7 @@ const Lobby = () => {
     return () => {
       mounted = false
     }
-  }, [searchParams, setActiveTheme])
+  }, [setActiveTheme])
 
   const fetchTicketsForGame = useCallback(
     async (targetGameId: string) => {
@@ -209,6 +251,22 @@ const Lobby = () => {
       }
     },
     [replaceFromBackendState],
+  )
+
+  const navigateToLiveGame = useCallback(
+    (isUserGesture: boolean) => {
+      if (isUserGesture) {
+        void unlockAudioFromUserGesture()
+      }
+
+      const params = new URLSearchParams()
+      const normalizedPhone = String(playerPhone ?? '').trim()
+      if (normalizedPhone) {
+        params.set('playerPhone', normalizedPhone)
+      }
+      navigate(`/live${params.toString() ? `?${params.toString()}` : ''}`)
+    },
+    [navigate, playerPhone],
   )
 
   useEffect(() => {
@@ -473,6 +531,7 @@ const Lobby = () => {
   const gameDisplayName = selectedGame?.name?.trim() || 'Tambola Game'
 
   useEffect(() => {
+    if (!soundEnabled) return
     if (!selectedGame?.id || !selectedGame.date) return
     if (selectedGame.status === 'RUNNING' || selectedGame.status === 'PAUSED' || selectedGame.status === 'ENDED') {
       return
@@ -485,25 +544,62 @@ const Lobby = () => {
     const withinPreGameWindow = timeToStartMs > 0 && timeToStartMs <= 2 * 60 * 1000
     if (!withinPreGameWindow) return
 
-    const announcementKey = `${selectedGame.id}:${selectedGame.date}`
-    if (preGameAnnouncementKeyRef.current === announcementKey) return
-    preGameAnnouncementKeyRef.current = announcementKey
+    const gameKey = `${selectedGame.id}:${selectedGame.date}`
 
-    void (async () => {
-      await playMusic('/sounds/intro_music.mp3', {
+    if (preGameMusicKeyRef.current !== gameKey) {
+      preGameMusicKeyRef.current = gameKey
+      void playMusic('/sounds/intro_music.mp3', {
         loop: true,
         volume: 0.25,
         fadeInMs: 600,
       })
-      await speakText(PRE_GAME_ANNOUNCEMENT_TEXT, 'dramatic')
+    }
+
+    const nextAnnouncement = PRE_GAME_ANNOUNCEMENTS.find(
+      (item) =>
+        timeToStartMs <= item.thresholdMs &&
+        !preGameAnnouncementLogRef.current.has(`${gameKey}:${item.id}`),
+    )
+    if (!nextAnnouncement) return
+
+    if (now - preGameLastAttemptAtRef.current < 12000) return
+    preGameLastAttemptAtRef.current = now
+
+    void (async () => {
+      const played = await speakText(nextAnnouncement.message, 'dramatic')
+      if (!played) return
+      preGameAnnouncementLogRef.current.add(`${gameKey}:${nextAnnouncement.id}`)
     })()
-  }, [now, selectedGame?.date, selectedGame?.id, selectedGame?.status])
+  }, [now, selectedGame?.date, selectedGame?.id, selectedGame?.status, soundEnabled])
 
   useEffect(() => {
     const status = selectedGame?.status
     if (status !== 'RUNNING') return
     void stopMusic({ fadeOutMs: 1200 })
   }, [selectedGame?.status])
+
+  useEffect(() => {
+    if (!selectedGame?.id) {
+      hasAutoEnteredLiveRef.current = false
+      return
+    }
+
+    if (selectedGame.status !== 'RUNNING') {
+      hasAutoEnteredLiveRef.current = false
+      return
+    }
+
+    if (hasAutoEnteredLiveRef.current) return
+    hasAutoEnteredLiveRef.current = true
+    navigateToLiveGame(false)
+  }, [navigateToLiveGame, selectedGame?.id, selectedGame?.status])
+
+  useEffect(() => {
+    if (soundEnabled) return
+    preGameMusicKeyRef.current = ''
+    preGameLastAttemptAtRef.current = 0
+    void stopMusic({ fadeOutMs: 400 })
+  }, [soundEnabled])
 
   useEffect(() => {
     return () => {
@@ -659,12 +755,7 @@ const Lobby = () => {
   const fullsheetBookedCount = businessSummary?.fullsheet_booked ?? 0
 
   const handleEnterLiveGame = () => {
-    const params = new URLSearchParams()
-    const normalizedPhone = String(playerPhone ?? '').trim()
-    if (normalizedPhone) {
-      params.set('playerPhone', normalizedPhone)
-    }
-    navigate(`/live${params.toString() ? `?${params.toString()}` : ''}`)
+    navigateToLiveGame(true)
   }
 
   const handleRequestBooking = async (ticket: PlayerTicket) => {
@@ -788,7 +879,7 @@ const Lobby = () => {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
             gap: '8px',
           }}
         >
@@ -808,6 +899,30 @@ const Lobby = () => {
             }}
           >
             Whatsapp
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setSoundEnabled((previous) => {
+                const next = !previous
+                if (next) {
+                  void unlockAudioFromUserGesture()
+                }
+                return next
+              })
+            }
+            style={{
+              background: '#111',
+              border: '3px solid #6b6b6b',
+              borderRadius: '10px',
+              color: '#fff',
+              fontSize: 'clamp(18px, 2.2vw, 30px)',
+              fontWeight: 700,
+              padding: '12px 10px',
+              cursor: 'pointer',
+            }}
+          >
+            Sound: {soundEnabled ? 'ON' : 'OFF'}
           </button>
           <button
             type="button"

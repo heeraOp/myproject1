@@ -137,6 +137,10 @@ const LiveGame = () => {
   const [isNumberUiFrozen, setIsNumberUiFrozen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [soundEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true
+    return window.localStorage.getItem('housie_player_sound_enabled') !== '0'
+  })
   const [theme, setTheme] = useState(getActiveTheme())
   const [isThemeLocked, setIsThemeLocked] = useState(isAdminThemeActive())
   const currentGameIdRef = useRef<string>('')
@@ -145,6 +149,8 @@ const LiveGame = () => {
   const currentNumberRef = useRef<number | null>(null)
   const calledNumbersRef = useRef<number[]>([])
   const winnerFreezeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const announcedWinnerKeysRef = useRef<Set<string>>(new Set())
+  const winnerQueueProcessingRef = useRef(false)
   const frozenDisplayRef = useRef<{
     currentNumber: number | null
     calledNumbers: number[]
@@ -169,12 +175,14 @@ const LiveGame = () => {
     replaceFromBackendState,
     setTicketsFromBackend,
     clearWinnerQueue,
+    winnerQueue,
+    dismissWinnerAnnouncement,
     setActiveTheme,
   } = useGameStore((state) => state)
   const {
     announcement: bingoAnnouncement,
     audioBlockedMessage,
-  } = useBingoCaller()
+  } = useBingoCaller({ soundEnabled })
 
   useEffect(() => {
     return subscribeThemeChange(({ theme: updatedTheme, isLocked }) => {
@@ -199,10 +207,14 @@ const LiveGame = () => {
 
   useGameSocket(selectedGameId || undefined)
 
-  const handleWinnerAnnouncement = useCallback((winnerName: string, prizeType: string) => {
-    const prizeLabel = PRIZE_LABEL_MAP[prizeType] ?? prizeType
-    const announcement = `Congratulations ${winnerName}! You won ${prizeLabel}.`
-    void playWinnerSoundFlow(announcement, 'dramatic')
+  const handleWinnerAnnouncement = useCallback(async (winnerName: string, prizeType: string) => {
+    const normalizedWinnerName = winnerName.trim() || 'Player'
+    const normalizedPrizeType = prizeType.trim() || 'Prize'
+    const prizeLabel = PRIZE_LABEL_MAP[normalizedPrizeType] ?? normalizedPrizeType
+    const announcement = `Congratulations ${normalizedWinnerName}! You won ${prizeLabel}.`
+    const soundPromise = soundEnabled
+      ? playWinnerSoundFlow(announcement, 'dramatic').catch(() => undefined)
+      : Promise.resolve()
 
     if (winnerFreezeTimerRef.current) {
       window.clearTimeout(winnerFreezeTimerRef.current)
@@ -216,16 +228,21 @@ const LiveGame = () => {
     setIsNumberUiFrozen(true)
     setWinnerPopup({
       visible: true,
-      winnerName,
-      prizeType,
+      winnerName: normalizedWinnerName,
+      prizeType: normalizedPrizeType,
     })
 
-    winnerFreezeTimerRef.current = window.setTimeout(() => {
-      setIsNumberUiFrozen(false)
-      setWinnerPopup((previous) => ({ ...previous, visible: false }))
-      winnerFreezeTimerRef.current = null
-    }, 3000)
-  }, [])
+    await new Promise<void>((resolve) => {
+      winnerFreezeTimerRef.current = window.setTimeout(() => {
+        setIsNumberUiFrozen(false)
+        setWinnerPopup((previous) => ({ ...previous, visible: false }))
+        winnerFreezeTimerRef.current = null
+        resolve()
+      }, 3000)
+    })
+
+    await soundPromise
+  }, [soundEnabled])
 
   useEffect(() => {
     let mounted = true
@@ -255,7 +272,7 @@ const LiveGame = () => {
     return () => {
       mounted = false
     }
-  }, [searchParams, setActiveTheme])
+  }, [setActiveTheme])
 
   const loadGameData = useCallback(async (gameId: string) => {
     const requestId = loadRequestRef.current + 1
@@ -313,6 +330,8 @@ const LiveGame = () => {
     ticketRefreshRequestRef.current += 1
 
     if (!selectedGameId) {
+      winnerQueueProcessingRef.current = false
+      announcedWinnerKeysRef.current.clear()
       setTickets([])
       setHistoryWinners([])
       setLeaderboard([])
@@ -327,6 +346,8 @@ const LiveGame = () => {
     setTickets([])
     setHistoryWinners([])
     setLeaderboard([])
+    announcedWinnerKeysRef.current.clear()
+    winnerQueueProcessingRef.current = false
     setWinnerPopup({ visible: false, winnerName: '', prizeType: '' })
     setIsNumberUiFrozen(false)
     setTicketsFromBackend(selectedGameId, [])
@@ -434,22 +455,42 @@ const LiveGame = () => {
       setLeaderboard((previous) => (areLeaderboardEntriesEqual(previous, nextEntries) ? previous : nextEntries))
     })
 
-    const unsubWinnerAnnouncement = socketManager.subscribe('WINNER_ANNOUNCEMENT', (event: unknown) => {
-      const payload = event as { winner_name?: unknown; prize_type?: unknown }
-      const winnerName = String(payload.winner_name ?? '').trim()
-      const prizeType = String(payload.prize_type ?? '').trim()
-      if (!winnerName || !prizeType) return
-      handleWinnerAnnouncement(winnerName, prizeType)
-    })
-
     return () => {
       unsubNewGame()
       unsubTicketsGenerated()
       unsubTicketBooked()
       unsubLeaderboardUpdate()
-      unsubWinnerAnnouncement()
     }
-  }, [clearWinnerQueue, handleWinnerAnnouncement, refreshTicketsForGame, setActiveTheme, setTicketsFromBackend])
+  }, [clearWinnerQueue, refreshTicketsForGame, setActiveTheme, setTicketsFromBackend])
+
+  useEffect(() => {
+    const activeWinner = winnerQueue[0]
+    if (!activeWinner || winnerQueueProcessingRef.current) return
+
+    const winnerName = String(activeWinner.winner_name ?? '').trim()
+    const prizeType = String(activeWinner.prize_name ?? '').trim()
+    if (!winnerName || !prizeType) {
+      dismissWinnerAnnouncement()
+      return
+    }
+
+    const winnerKey = activeWinner.id || `${winnerName.toLowerCase()}::${prizeType.toUpperCase()}`
+    if (announcedWinnerKeysRef.current.has(winnerKey)) {
+      dismissWinnerAnnouncement()
+      return
+    }
+    announcedWinnerKeysRef.current.add(winnerKey)
+
+    winnerQueueProcessingRef.current = true
+    void (async () => {
+      try {
+        await handleWinnerAnnouncement(winnerName, prizeType)
+      } finally {
+        dismissWinnerAnnouncement()
+        winnerQueueProcessingRef.current = false
+      }
+    })()
+  }, [dismissWinnerAnnouncement, handleWinnerAnnouncement, winnerQueue])
 
   useEffect(() => {
     if (!selectedGameId || storeGameId !== selectedGameId) return
@@ -556,11 +597,12 @@ const LiveGame = () => {
 
   return (
     <main className="live-shell">
-      <AnnouncementBanner gameId={selectedGameId || undefined} />
+      <AnnouncementBanner gameId={selectedGameId || undefined} enableSound={soundEnabled} />
       <WinnerPopup
         visible={winnerPopup.visible}
         winnerName={winnerPopup.winnerName}
         prizeType={winnerPopup.prizeType}
+        enableSound={soundEnabled}
       />
       <section className="live-header-card">
         <div className="live-header-top">

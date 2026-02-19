@@ -2,6 +2,17 @@ import json
 
 from channels.generic.websocket import AsyncWebsocketConsumer
 
+VOICE_MODE_VALUES = {
+    "CLASSIC",
+    "FUNNY",
+    "CRAZY",
+    "MALE_DEEP",
+    "MALE_ENERGETIC",
+    "FUNNY_CARTOON",
+    "FUNNY_COMEDIC",
+    "FUNNY_CRAZY",
+}
+
 
 class GameConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -18,6 +29,47 @@ class GameConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(self.global_group_name, self.channel_name)
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def receive(self, text_data=None, bytes_data=None):
+        if not text_data:
+            return
+
+        try:
+            payload = json.loads(text_data)
+        except Exception:
+            return
+
+        if not isinstance(payload, dict):
+            return
+
+        message_type = str(payload.get("type", "")).strip().lower()
+        if message_type != "voice_mode_update":
+            return
+
+        user = self.scope.get("user")
+        is_admin = bool(
+            user
+            and getattr(user, "is_authenticated", False)
+            and (
+                getattr(user, "is_superuser", False)
+                or getattr(user, "is_staff", False)
+                or getattr(user, "role", None) == "ADMIN"
+            )
+        )
+        if not is_admin:
+            return
+
+        voice_mode = str(payload.get("voice_mode", "")).strip().upper()
+        if voice_mode not in VOICE_MODE_VALUES:
+            return
+
+        await self.channel_layer.group_send(
+            self.group_name,
+            {
+                "type": "voice_mode_update",
+                "voice_mode": voice_mode,
+            },
+        )
 
     async def number_called(self, event):
         await self.send(
@@ -148,6 +200,16 @@ class GameConsumer(AsyncWebsocketConsumer):
                     "type": "WINNER_ANNOUNCEMENT",
                     "winner_name": event.get("winner_name", ""),
                     "prize_type": event.get("prize_type", ""),
+                }
+            )
+        )
+
+    async def voice_mode_update(self, event):
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "VOICE_MODE_UPDATE",
+                    "voice_mode": event.get("voice_mode", ""),
                 }
             )
         )
