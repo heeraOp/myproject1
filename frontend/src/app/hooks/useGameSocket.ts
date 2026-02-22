@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
 import { socketManager } from '@/api/websocket/socketManager'
 import { useAnnouncementStore } from '@/app/store/announcement.store'
 import { useGameStore } from '@/app/store/game.store'
@@ -231,6 +231,11 @@ const resolveVoiceTypeForMode = (mode: VoiceMode): VoiceType => {
 }
 
 const normalizeBaseUrl = (value: string): string => String(value || '').replace(/\/+$/, '')
+const toInteger = (value: string | number): number | null => {
+  if (typeof value === 'number' && Number.isInteger(value)) return value
+  const parsed = Number.parseInt(String(value), 10)
+  return Number.isInteger(parsed) ? parsed : null
+}
 
 const resolveMediaAudioUrl = (value: string): string => {
   const raw = String(value || '').trim()
@@ -251,56 +256,54 @@ export const useGameSocket = (gameId?: string): void => {
   const addAnnouncement = useAnnouncementStore((state) => state.addAnnouncement)
   const setVoiceMode = useVoiceModeStore((state) => state.setMode)
   const setVoiceSpeed = useVoiceModeStore((state) => state.setSpeed)
-  const toInteger = (value: string | number): number | null => {
-    if (typeof value === 'number' && Number.isInteger(value)) return value
-    const parsed = Number.parseInt(String(value), 10)
-    return Number.isInteger(parsed) ? parsed : null
-  }
-  const addWinnerEvent = (event: {
-    id: string | number
-    ticketId: string | number
-    prizeName: string
-    winnerName: string
-    timestamp: string
-  }) => {
-    const winnerId = toInteger(event.id)
-    const ticketId = String(event.ticketId)
-    const ticketMatch = useGameStore
-      .getState()
-      .tickets.find((ticket) => String((ticket as { id?: string }).id ?? '') === ticketId) as
-      | { ticket_number?: number }
-      | undefined
-    const resolvedTicketNumber =
-      ticketMatch && Number.isInteger(ticketMatch.ticket_number) ? ticketMatch.ticket_number : null
+  const addWinnerEvent = useCallback(
+    (event: {
+      id: string | number
+      ticketId: string | number
+      prizeName: string
+      winnerName: string
+      timestamp: string
+    }) => {
+      const winnerId = toInteger(event.id)
+      const ticketId = String(event.ticketId)
+      const ticketMatch = useGameStore
+        .getState()
+        .tickets.find((ticket) => String((ticket as { id?: string }).id ?? '') === ticketId) as
+        | { ticket_number?: number }
+        | undefined
+      const resolvedTicketNumber =
+        ticketMatch && Number.isInteger(ticketMatch.ticket_number) ? ticketMatch.ticket_number : null
 
-    if (winnerId !== null && resolvedTicketNumber !== null && resolvedTicketNumber !== undefined) {
-      applyBackendEvent({
-        type: 'winner.announced',
-        winner: {
-          id: winnerId,
-          prize_type: event.prizeName,
-          prize_amount: 0,
-          ticket_number: resolvedTicketNumber,
-          player_name: event.winnerName.trim() || 'Player',
-          won_at: event.timestamp,
-        },
-      })
-    }
+      if (winnerId !== null && resolvedTicketNumber !== null && resolvedTicketNumber !== undefined) {
+        applyBackendEvent({
+          type: 'winner.announced',
+          winner: {
+            id: winnerId,
+            prize_type: event.prizeName,
+            prize_amount: 0,
+            ticket_number: resolvedTicketNumber,
+            player_name: event.winnerName.trim() || 'Player',
+            won_at: event.timestamp,
+          },
+        })
+      }
 
-    const winnerAnnouncementId = `winner-${String(event.id)}`
-    const storeState = useGameStore.getState()
-    const alreadyQueued = storeState.winnerQueue.some((item) => item.id === winnerAnnouncementId)
-    const alreadyKnownWinner =
-      winnerId !== null && storeState.winners.some((winner) => winner.id === winnerId)
-    if (!alreadyQueued && !alreadyKnownWinner) {
-      enqueueWinnerAnnouncement({
-        id: winnerAnnouncementId,
-        winner_name: event.winnerName.trim() || 'Player',
-        prize_name: event.prizeName.trim() || 'Prize',
-        ticket_number: resolvedTicketNumber ?? null,
-      })
-    }
-  }
+      const winnerAnnouncementId = `winner-${String(event.id)}`
+      const storeState = useGameStore.getState()
+      const alreadyQueued = storeState.winnerQueue.some((item) => item.id === winnerAnnouncementId)
+      const alreadyKnownWinner =
+        winnerId !== null && storeState.winners.some((winner) => winner.id === winnerId)
+      if (!alreadyQueued && !alreadyKnownWinner) {
+        enqueueWinnerAnnouncement({
+          id: winnerAnnouncementId,
+          winner_name: event.winnerName.trim() || 'Player',
+          prize_name: event.prizeName.trim() || 'Prize',
+          ticket_number: resolvedTicketNumber ?? null,
+        })
+      }
+    },
+    [applyBackendEvent, enqueueWinnerAnnouncement],
+  )
 
   useEffect(() => {
     if (!gameId) return
@@ -491,6 +494,7 @@ export const useGameSocket = (gameId?: string): void => {
     replaceFromBackendState,
     enqueueWinnerAnnouncement,
     addAnnouncement,
+    addWinnerEvent,
     setVoiceMode,
     setVoiceSpeed,
   ])

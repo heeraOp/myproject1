@@ -76,8 +76,9 @@ const AdminTicketView = () => {
         setError('Unable to load tickets for this game.')
         setTickets([])
       } finally {
-        if (!mounted) return
-        setLoading(false)
+        if (mounted) {
+          setLoading(false)
+        }
       }
     }
 

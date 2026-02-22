@@ -96,19 +96,16 @@ const AnnouncementBanner = ({
   }, [])
 
   useEffect(() => {
-    if (!latestAnnouncement) {
-      setIsVisible(false)
-      return
-    }
-
-    setIsVisible(true)
-
     if (hideTimeoutRef.current) {
       window.clearTimeout(hideTimeoutRef.current)
     }
     if (dismissTimeoutRef.current) {
       window.clearTimeout(dismissTimeoutRef.current)
     }
+    if (!latestAnnouncement) return
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsVisible(true)
 
     hideTimeoutRef.current = window.setTimeout(() => {
       setIsVisible(false)

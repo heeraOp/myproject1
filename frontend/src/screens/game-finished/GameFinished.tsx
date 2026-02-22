@@ -160,8 +160,9 @@ const GameFinished = () => {
         if (!mounted) return
         setError('Unable to load finished game summary.')
       } finally {
-        if (!mounted) return
-        setLoading(false)
+        if (mounted) {
+          setLoading(false)
+        }
       }
     }
 

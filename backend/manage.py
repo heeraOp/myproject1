@@ -6,6 +6,8 @@ import sys
 
 def main():
     """Run administrative tasks."""
+    if "check" in sys.argv and "--deploy" in sys.argv and "DJANGO_ENV" not in os.environ:
+        os.environ["DJANGO_ENV"] = "production"
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
     try:
         from django.core.management import execute_from_command_line

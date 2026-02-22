@@ -6,6 +6,10 @@
 // - provide playSound(url), playElement(audio), stopCurrent(), isUnlocked()
 
 type MaybeAudio = HTMLAudioElement | null
+type WindowWithLegacyAudioContext = Window & {
+  AudioContext?: typeof AudioContext
+  webkitAudioContext?: typeof AudioContext
+}
 
 let currentAudio: MaybeAudio = null
 let audioUnlocked = false
@@ -54,7 +58,8 @@ const unlockAudio = async (): Promise<boolean> => {
   if (audioUnlocked) return true
   try {
     // Try to resume WebAudio if available
-    const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext
+    const audioWindow = window as WindowWithLegacyAudioContext
+    const AudioCtx = audioWindow.AudioContext || audioWindow.webkitAudioContext
     if (AudioCtx) {
       try {
         const ctx = new AudioCtx()
@@ -138,7 +143,9 @@ const playElement = async (audio: HTMLAudioElement): Promise<boolean> => {
       try {
         currentAudio.pause()
         currentAudio.currentTime = 0
-      } catch {}
+      } catch {
+        // ignore
+      }
     }
     currentAudio = audio
     audio.preload = 'auto'
@@ -171,13 +178,17 @@ const playSound = async (url: string): Promise<boolean> => {
       try {
         currentAudio.pause()
         currentAudio.currentTime = 0
-      } catch {}
+      } catch {
+        // ignore
+      }
     }
     currentAudio.src = url
     // ensure load is attempted
     try {
       currentAudio.load()
-    } catch {}
+    } catch {
+      // ignore
+    }
     const p = currentAudio.play()
     if (p && typeof p.then === 'function') {
       return p.then(() => true).catch((err) => {

@@ -1,7 +1,19 @@
 import { useEffect, type PropsWithChildren } from 'react'
 import { fetchCurrentPublicGame } from '@/api/rest/games'
 import { useGameStore } from '@/app/store/game.store'
-import { resolveThemeKey, resolveThemeOverlay } from '@/theme/themeRegistry'
+import DiwaliOverlay from '@/theme/overlays/DiwaliOverlay'
+import HoliOverlay from '@/theme/overlays/HoliOverlay'
+import { resolveThemeKey } from '@/theme/themeRegistry'
+
+const renderThemeOverlay = (overlayKey: string | null) => {
+  if (overlayKey === 'diwali' || overlayKey === 'festival-diwali') {
+    return <DiwaliOverlay key="theme-overlay-diwali" />
+  }
+  if (overlayKey === 'holi') {
+    return <HoliOverlay key="theme-overlay-holi" />
+  }
+  return null
+}
 
 const ThemeProvider = ({ children }: PropsWithChildren) => {
   const activeTheme = useGameStore((state) => state.activeTheme)
@@ -29,12 +41,11 @@ const ThemeProvider = ({ children }: PropsWithChildren) => {
   }, [setActiveTheme])
 
   const overlayKey = resolveThemeKey(activeTheme)
-  const OverlayComponent = resolveThemeOverlay(activeTheme)
 
   return (
     <>
       {children}
-      {OverlayComponent ? <OverlayComponent key={overlayKey ?? 'theme-overlay'} /> : null}
+      {renderThemeOverlay(overlayKey)}
     </>
   )
 }

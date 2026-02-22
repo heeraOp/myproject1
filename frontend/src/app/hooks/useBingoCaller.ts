@@ -56,7 +56,7 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
   const [announcementNumber, setAnnouncementNumber] = useState<number | null>(null)
   const [audioUnlocked, setAudioUnlocked] = useState(isAudioUnlocked())
   const [isAudioReady, setIsAudioReady] = useState(isAudioUnlocked())
-  const [isSpeechSupported, setIsSpeechSupported] = useState(false)
+  const isSpeechSupported = typeof window !== 'undefined' && typeof Audio !== 'undefined'
   const [audioBlockedMessage, setAudioBlockedMessage] = useState<string | null>(null)
 
   const initializedRef = useRef(false)
@@ -77,11 +77,6 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
     return () => {
       unsubscribe()
     }
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    setIsSpeechSupported(typeof Audio !== 'undefined')
   }, [])
 
   const speakAnnouncement = useCallback(
@@ -151,7 +146,6 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
   useEffect(() => {
     if (soundEnabled) return
     pendingSpeechRef.current = null
-    setAudioBlockedMessage(null)
     stopSpeaking()
   }, [soundEnabled])
 
@@ -173,8 +167,6 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
 
     if (calledNumbers.length === 0) {
       previousCalledSetRef.current = new Set()
-      setAnnouncement('')
-      setAnnouncementNumber(null)
       return
     }
 
@@ -197,6 +189,7 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
     const text = getBingoCallText(calledNumber)
     if (!text) return
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAnnouncement(text)
     setAnnouncementNumber(calledNumber)
 
@@ -250,6 +243,8 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
     }
   }, [])
 
+  const displayAudioBlockedMessage = soundEnabled ? audioBlockedMessage : null
+
   return useMemo(
     () => ({
       announcement,
@@ -257,7 +252,7 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
       audioUnlocked,
       isAudioReady,
       isSpeechSupported,
-      audioBlockedMessage,
+      audioBlockedMessage: displayAudioBlockedMessage,
       unlockAudio,
     }),
     [
@@ -266,7 +261,7 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
       audioUnlocked,
       isAudioReady,
       isSpeechSupported,
-      audioBlockedMessage,
+      displayAudioBlockedMessage,
       unlockAudio,
     ],
   )

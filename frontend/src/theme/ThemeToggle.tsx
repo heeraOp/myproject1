@@ -1,4 +1,5 @@
-import { useTheme, type AppTheme } from '@/theme/ThemeContext'
+import type { AppTheme } from '@/theme/theme-context'
+import { useTheme } from '@/theme/useTheme'
 
 const THEME_OPTIONS: Array<{ value: AppTheme; label: string }> = [
   { value: 'default', label: 'Default' },

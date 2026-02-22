@@ -1,26 +1,10 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type PropsWithChildren,
-} from 'react'
+import { useEffect, useMemo, useState, type PropsWithChildren } from 'react'
+import { ThemeContext, type AppTheme, type ThemeContextValue } from '@/theme/theme-context'
 import '@/theme/themes.css'
-
-export type AppTheme = 'default' | 'diwali' | 'holi'
-
-type ThemeContextValue = {
-  theme: AppTheme
-  setTheme: (theme: AppTheme) => void
-  toggleTheme: () => void
-}
 
 const THEME_STORAGE_KEY = 'housie_app_theme'
 const THEME_CLASSES = ['theme-default', 'theme-diwali', 'theme-holi']
 const THEME_ORDER: AppTheme[] = ['default', 'diwali', 'holi']
-
-const ThemeContext = createContext<ThemeContextValue | undefined>(undefined)
 
 const isTheme = (value: string | null): value is AppTheme =>
   value === 'default' || value === 'diwali' || value === 'holi'
@@ -59,12 +43,4 @@ export const ThemeProvider = ({ children }: PropsWithChildren) => {
   }, [theme])
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
-}
-
-export const useTheme = (): ThemeContextValue => {
-  const context = useContext(ThemeContext)
-  if (!context) {
-    throw new Error('useTheme must be used within ThemeProvider.')
-  }
-  return context
 }
