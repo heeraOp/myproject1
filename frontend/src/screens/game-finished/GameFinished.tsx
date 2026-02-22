@@ -29,7 +29,9 @@ const PRIZE_LABEL_MAP: Record<string, string> = {
   SECOND_HOUSE: 'Second Full House',
   THIRD_HOUSE: 'Third Full House',
   FULL_SHEET: 'Full Sheet Bonus',
+  FULL_SHEET_BONUS: 'Full Sheet Bonus',
   HALF_SHEET: 'Half Sheet Bonus',
+  HALF_SHEET_BONUS: 'Half Sheet Bonus',
   TOP_LINE: 'Top Line',
   MIDDLE_LINE: 'Middle Line',
   BOTTOM_LINE: 'Bottom Line',
@@ -39,6 +41,44 @@ const PRIZE_LABEL_MAP: Record<string, string> = {
   EARLY_5: 'Early 5',
   QUICK_6: 'Quick 6',
   QUICK_7: 'Quick 7',
+}
+
+const normalizePrizeType = (value: string | null | undefined): string => {
+  const normalized = String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_')
+  if (normalized === 'HALF_SHEET_BONUS') return 'HALF_SHEET'
+  if (normalized === 'FULL_SHEET_BONUS') return 'FULL_SHEET'
+  return normalized
+}
+
+const dedupeWinners = (winners: Array<PublicWinner>): PublicWinner[] => {
+  const seenRows = new Set<string>()
+  const seenSheetPrizes = new Set<string>()
+  const deduped: PublicWinner[] = []
+
+  winners.forEach((winner) => {
+    const normalizedPrize = normalizePrizeType(winner.prize_type)
+    const normalizedPlayer = String(winner.player_name ?? '').trim().toLowerCase()
+    const rowKey = `${normalizedPrize}:${winner.ticket_number}:${normalizedPlayer}`
+
+    if (normalizedPrize === 'HALF_SHEET' || normalizedPrize === 'FULL_SHEET') {
+      if (seenSheetPrizes.has(normalizedPrize)) return
+      seenSheetPrizes.add(normalizedPrize)
+    } else if (seenRows.has(rowKey)) {
+      return
+    } else {
+      seenRows.add(rowKey)
+    }
+
+    deduped.push({
+      ...winner,
+      prize_type: normalizedPrize || winner.prize_type,
+    })
+  })
+
+  return deduped
 }
 
 const GameFinished = () => {
@@ -136,6 +176,7 @@ const GameFinished = () => {
     [games, selectedGameId],
   )
   const isAdminView = location.pathname.startsWith('/admin')
+  const displayWinners = useMemo(() => dedupeWinners(winners), [winners])
 
   useGameSocket(selectedGameId || undefined)
 
@@ -194,7 +235,7 @@ const GameFinished = () => {
               <div>Total called numbers</div>
               <div>{summary?.called_numbers?.length ?? 0}</div>
               <div>Total winners</div>
-              <div>{winners.length}</div>
+              <div>{displayWinners.length}</div>
             </div>
           </section>
 
@@ -235,13 +276,13 @@ const GameFinished = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {winners.length === 0 && (
+                  {displayWinners.length === 0 && (
                     <tr>
                       <td colSpan={4}>No winners recorded.</td>
                     </tr>
                   )}
-                  {winners.map((winner) => (
-                    <tr key={winner.id}>
+                  {displayWinners.map((winner) => (
+                    <tr key={winner.id ? String(winner.id) : `${winner.prize_type}:${winner.ticket_number}:${winner.player_name ?? ''}`}>
                       <td>{PRIZE_LABEL_MAP[winner.prize_type] ?? winner.prize_type}</td>
                       <td>{winner.player_name ?? 'Player'}</td>
                       <td>{winner.ticket_number}</td>

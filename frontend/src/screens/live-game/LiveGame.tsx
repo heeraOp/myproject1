@@ -38,7 +38,9 @@ const PRIZE_LABEL_MAP: Record<string, string> = {
   SECOND_HOUSE: 'Second Full House',
   THIRD_HOUSE: 'Third Full House',
   FULL_SHEET: 'Full Sheet Bonus',
+  FULL_SHEET_BONUS: 'Full Sheet Bonus',
   HALF_SHEET: 'Half Sheet Bonus',
+  HALF_SHEET_BONUS: 'Half Sheet Bonus',
   TOP_LINE: 'Top Line',
   MIDDLE_LINE: 'Middle Line',
   BOTTOM_LINE: 'Bottom Line',
@@ -56,14 +58,42 @@ type GameRecreatedSocketPayload = {
   reason?: string
 }
 
+const normalizePrizeType = (value: string | null | undefined): string => {
+  const normalized = String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_')
+  if (normalized === 'HALF_SHEET_BONUS') return 'HALF_SHEET'
+  if (normalized === 'FULL_SHEET_BONUS') return 'FULL_SHEET'
+  return normalized
+}
+
 const dedupeWinners = (winners: Array<PublicWinner>) => {
-  const seen = new Set<string>()
-  return winners.filter((winner) => {
-    const key = winner.id ? `id:${winner.id}` : `${winner.prize_type}:${winner.ticket_number}`
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
+  const seenRows = new Set<string>()
+  const seenSheetPrizes = new Set<string>()
+  const deduped: PublicWinner[] = []
+
+  winners.forEach((winner) => {
+    const normalizedPrize = normalizePrizeType(winner.prize_type)
+    const normalizedPlayer = String(winner.player_name ?? '').trim().toLowerCase()
+    const rowKey = `${normalizedPrize}:${winner.ticket_number}:${normalizedPlayer}`
+
+    if (normalizedPrize === 'HALF_SHEET' || normalizedPrize === 'FULL_SHEET') {
+      if (seenSheetPrizes.has(normalizedPrize)) return
+      seenSheetPrizes.add(normalizedPrize)
+    } else if (seenRows.has(rowKey)) {
+      return
+    } else {
+      seenRows.add(rowKey)
+    }
+
+    deduped.push({
+      ...winner,
+      prize_type: normalizedPrize || winner.prize_type,
+    })
   })
+
+  return deduped
 }
 
 const areLeaderboardEntriesEqual = (
@@ -568,8 +598,10 @@ const LiveGame = () => {
   const orderedPrizes = useMemo(
     () =>
       [...prizes].sort((a, b) => {
-        const aLabel = PRIZE_LABEL_MAP[a.prize_type] ?? a.prize_type
-        const bLabel = PRIZE_LABEL_MAP[b.prize_type] ?? b.prize_type
+        const aType = normalizePrizeType(a.prize_type)
+        const bType = normalizePrizeType(b.prize_type)
+        const aLabel = PRIZE_LABEL_MAP[aType] ?? a.prize_type
+        const bLabel = PRIZE_LABEL_MAP[bType] ?? b.prize_type
         return aLabel.localeCompare(bLabel)
       }),
     [prizes],
@@ -718,11 +750,14 @@ const LiveGame = () => {
             <h2>Prize Monitor</h2>
             <div className="live-prize-grid">
               {orderedPrizes.map((prize) => {
-                const winner = mergedWinners.find((item) => item.prize_type === prize.prize_type)
-                const claimed = lockedPrizeSet.has(prize.prize_type)
+                const normalizedPrizeType = normalizePrizeType(prize.prize_type)
+                const winner = mergedWinners.find(
+                  (item) => normalizePrizeType(item.prize_type) === normalizedPrizeType,
+                )
+                const claimed = lockedPrizeSet.has(prize.prize_type) || lockedPrizeSet.has(normalizedPrizeType)
                 return (
-                  <article key={prize.prize_type} className={`prize-tile ${claimed ? 'claimed' : ''}`}>
-                    <header>{PRIZE_LABEL_MAP[prize.prize_type] ?? prize.prize_type}</header>
+                  <article key={`${prize.prize_type}-${prize.amount}`} className={`prize-tile ${claimed ? 'claimed' : ''}`}>
+                    <header>{PRIZE_LABEL_MAP[normalizedPrizeType] ?? prize.prize_type}</header>
                     <p>Amount: {prize.amount}</p>
                     <p>Status: {claimed ? 'CLAIMED' : 'OPEN'}</p>
                     <p>Winner: {winner ? `${winner.player_name ?? 'Player'} (#${winner.ticket_number})` : '--'}</p>
@@ -750,7 +785,7 @@ const LiveGame = () => {
                     </tr>
                   )}
                   {mergedWinners.map((winner) => (
-                    <tr key={winner.id}>
+                    <tr key={winner.id ? String(winner.id) : `${winner.prize_type}:${winner.ticket_number}:${winner.player_name ?? ''}`}>
                       <td>{PRIZE_LABEL_MAP[winner.prize_type] ?? winner.prize_type}</td>
                       <td>{winner.player_name ?? 'Player'}</td>
                       <td>{winner.ticket_number}</td>
