@@ -10,8 +10,22 @@ from django.db import transaction
 
 from claims.utils.evaluator import evaluate_claims_for_game
 from games.models import Game
+from games.services.voice_events import (
+    GAME_END_VOICE_KEY,
+    GAME_END_VOICE_TEXT,
+    broadcast_game_voice_event,
+)
+from games.services.winner_pause import get_winner_announcement_hold_remaining
 from games.utils.calling import call_next_number
 from games.utils.leaderboard import build_live_leaderboard
+
+
+def _refresh_lock_ttl(redis_client, lock_key, lock_value, ttl_seconds):
+    ttl = max(5, int(ttl_seconds))
+    try:
+        redis_client.set(lock_key, lock_value, ex=ttl, xx=True)
+    except redis.RedisError:
+        return
 
 
 @shared_task
@@ -60,6 +74,12 @@ def auto_call_numbers(game_id):
                     "status": "ENDED",
                 },
             )
+            broadcast_game_voice_event(
+                game_id=game_id,
+                event="game_end",
+                voice_key=GAME_END_VOICE_KEY,
+                voice_text=GAME_END_VOICE_TEXT,
+            )
             return True
 
         return False
@@ -80,6 +100,17 @@ def auto_call_numbers(game_id):
 
             if game.status != Game.Status.RUNNING:
                 return
+
+            winner_hold_remaining = get_winner_announcement_hold_remaining(game_id=game.id)
+            if winner_hold_remaining > 0:
+                _refresh_lock_ttl(
+                    redis_client,
+                    lock_key,
+                    lock_value,
+                    ttl_seconds=(winner_hold_remaining * 2) + 2,
+                )
+                time.sleep(max(0.2, winner_hold_remaining))
+                continue
 
             called_attr = getattr(game, "called_numbers", None)
             number = None
@@ -138,9 +169,16 @@ def auto_call_numbers(game_id):
             if finish_game_if_needed():
                 return
 
-            interval = game.calling_interval or 1
-            redis_client.set(lock_key, lock_value, ex=max(5, int(interval) * 2), xx=True)
-            time.sleep(max(1, int(interval)))
+            interval = max(1, int(game.calling_interval or 1))
+            winner_hold_remaining = get_winner_announcement_hold_remaining(game_id=game.id)
+            sleep_seconds = max(float(interval), float(winner_hold_remaining))
+            _refresh_lock_ttl(
+                redis_client,
+                lock_key,
+                lock_value,
+                ttl_seconds=(sleep_seconds * 2) + 2,
+            )
+            time.sleep(max(0.2, sleep_seconds))
     finally:
         current_value = redis_client.get(lock_key)
         if current_value and current_value.decode() == lock_value:

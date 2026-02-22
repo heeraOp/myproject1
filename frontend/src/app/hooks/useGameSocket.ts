@@ -4,6 +4,8 @@ import { useAnnouncementStore } from '@/app/store/announcement.store'
 import { useGameStore } from '@/app/store/game.store'
 import { type VoiceMode, useVoiceModeStore } from '@/app/store/voiceMode.store'
 import { REST_BASE_URL } from '@/config'
+import { playAudioElementSafely } from '@/utils/audioEngine'
+import { queueSpeakText, type VoiceType } from '@/utils/speakText'
 
 type GameStartedEvent = {
   type: 'game.started'
@@ -50,6 +52,8 @@ type AnnouncementEvent = {
   timestamp: string
   game_id: string | number
   announcement_id?: number | string
+  audio_url?: string | null
+  audio_mime_type?: string | null
 }
 
 type VoiceModeUpdateEvent = {
@@ -60,6 +64,12 @@ type VoiceModeUpdateEvent = {
 type VoiceSpeedUpdateEvent = {
   type: 'VOICE_SPEED_UPDATE'
   voice_speed: number
+}
+
+type VoiceEventSocketPayload = {
+  type: 'voice_event'
+  event: string
+  audio_url: string
 }
 
 type EngineSocketEvent = GameStartedEvent | NumberCalledEvent | GameFinishedEvent | WinnerAnnouncedEvent
@@ -106,11 +116,21 @@ const isAnnouncementEvent = (payload: unknown): payload is AnnouncementEvent => 
   if (!payload || typeof payload !== 'object') return false
   const event = payload as Record<string, unknown>
   const hasGameId = typeof event.game_id === 'string' || typeof event.game_id === 'number'
+  const hasValidAudioUrl =
+    event.audio_url === undefined ||
+    event.audio_url === null ||
+    typeof event.audio_url === 'string'
+  const hasValidAudioMime =
+    event.audio_mime_type === undefined ||
+    event.audio_mime_type === null ||
+    typeof event.audio_mime_type === 'string'
   return (
     event.type === 'announcement' &&
     typeof event.message === 'string' &&
     typeof event.timestamp === 'string' &&
-    hasGameId
+    hasGameId &&
+    hasValidAudioUrl &&
+    hasValidAudioMime
   )
 }
 
@@ -130,10 +150,13 @@ const isWinnerBroadcastEvent = (payload: unknown): payload is WinnerBroadcastEve
 
 const isVoiceMode = (value: unknown): value is VoiceMode =>
   value === 'CLASSIC' ||
+  value === 'FEMALE_SHOUT' ||
   value === 'FUNNY' ||
   value === 'CRAZY' ||
   value === 'MALE_DEEP' ||
   value === 'MALE_ENERGETIC' ||
+  value === 'ROYAL_COMMANDER' ||
+  value === 'SPORTS_COMMENTATOR' ||
   value === 'FUNNY_CARTOON' ||
   value === 'FUNNY_COMEDIC' ||
   value === 'FUNNY_CRAZY'
@@ -148,6 +171,77 @@ const isVoiceSpeedUpdateEvent = (payload: unknown): payload is VoiceSpeedUpdateE
   if (!payload || typeof payload !== 'object') return false
   const event = payload as Record<string, unknown>
   return event.type === 'VOICE_SPEED_UPDATE' && Number.isFinite(Number(event.voice_speed))
+}
+
+const isVoiceEventSocketPayload = (payload: unknown): payload is VoiceEventSocketPayload => {
+  if (!payload || typeof payload !== 'object') return false
+  const event = payload as Record<string, unknown>
+  return (
+    event.type === 'voice_event' &&
+    typeof event.event === 'string' &&
+    typeof event.audio_url === 'string' &&
+    String(event.audio_url).trim().length > 0
+  )
+}
+
+const GAME_START_FALLBACK_TEXT =
+  'The game is about to start. Players get ready. Today is your lucky day.'
+const GAME_END_FALLBACK_TEXT = 'The game has ended. Congratulations to all winners.'
+
+const PRIZE_LABEL_MAP: Record<string, string> = {
+  FIRST_HOUSE: 'First Full House',
+  SECOND_HOUSE: 'Second Full House',
+  THIRD_HOUSE: 'Third Full House',
+  FULL_SHEET: 'Full Sheet Bonus',
+  FULL_SHEET_BONUS: 'Full Sheet Bonus',
+  HALF_SHEET: 'Half Sheet Bonus',
+  HALF_SHEET_BONUS: 'Half Sheet Bonus',
+  TOP_LINE: 'Top Line',
+  MIDDLE_LINE: 'Middle Line',
+  BOTTOM_LINE: 'Bottom Line',
+  BOX: 'Box Bonus',
+  CORNER: 'Corner',
+  STAR: 'Star',
+  EARLY_5: 'Early 5',
+  QUICK_6: 'Quick 6',
+  QUICK_7: 'Quick 7',
+}
+
+const normalizePrizeToken = (value: string): string =>
+  String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_')
+
+const prizeLabelFromWinnerEvent = (value: string): string => {
+  const token = normalizePrizeToken(value)
+  return PRIZE_LABEL_MAP[token] ?? (String(value || '').trim() || 'Prize')
+}
+
+const resolveVoiceTypeForMode = (mode: VoiceMode): VoiceType => {
+  if (mode === 'FEMALE_SHOUT') return 'female_shout'
+  if (mode === 'FUNNY' || mode === 'FUNNY_CARTOON' || mode === 'FUNNY_COMEDIC' || mode === 'FUNNY_CRAZY') {
+    return 'funny'
+  }
+  if (mode === 'SPORTS_COMMENTATOR') return 'savage'
+  if (mode === 'ROYAL_COMMANDER') return 'dramatic'
+  if (mode === 'CRAZY') return 'savage'
+  if (mode === 'MALE_DEEP' || mode === 'MALE_ENERGETIC') return 'dramatic'
+  return 'normal'
+}
+
+const normalizeBaseUrl = (value: string): string => String(value || '').replace(/\/+$/, '')
+
+const resolveMediaAudioUrl = (value: string): string => {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (/^https?:\/\//i.test(raw)) return raw
+  if (raw.startsWith('/')) {
+    const base = normalizeBaseUrl(REST_BASE_URL || '')
+    if (!base) return raw
+    return `${base}${raw}`
+  }
+  return raw
 }
 
 export const useGameSocket = (gameId?: string): void => {
@@ -212,6 +306,8 @@ export const useGameSocket = (gameId?: string): void => {
     if (!gameId) return
     let isActive = true
     let recoveryInFlight = false
+    let activeVoiceAudio: HTMLAudioElement | null = null
+    const voiceEventSeenAt = new Map<string, number>()
 
     const recoverState = async () => {
       if (recoveryInFlight || !isActive) return
@@ -243,6 +339,17 @@ export const useGameSocket = (gameId?: string): void => {
       }),
       socketManager.subscribe('game.started', (event: unknown) => {
         applyBackendEvent(event as EngineSocketEvent)
+        const scheduledAt = Date.now()
+        window.setTimeout(() => {
+          if (!isActive) return
+          const seenAt = voiceEventSeenAt.get('game_start') ?? 0
+          if (seenAt >= scheduledAt) return
+          const mode = useVoiceModeStore.getState().mode
+          void queueSpeakText(GAME_START_FALLBACK_TEXT, resolveVoiceTypeForMode(mode), {
+            rate: useVoiceModeStore.getState().speed,
+            pitch: 1,
+          })
+        }, 1400)
       }),
       socketManager.subscribe('number.called', (event: unknown) => {
         if (!isNumberCalledEvent(event)) return
@@ -250,6 +357,17 @@ export const useGameSocket = (gameId?: string): void => {
       }),
       socketManager.subscribe('game.finished', (event: unknown) => {
         applyBackendEvent(event as EngineSocketEvent)
+        const scheduledAt = Date.now()
+        window.setTimeout(() => {
+          if (!isActive) return
+          const seenAt = voiceEventSeenAt.get('game_end') ?? 0
+          if (seenAt >= scheduledAt) return
+          const mode = useVoiceModeStore.getState().mode
+          void queueSpeakText(GAME_END_FALLBACK_TEXT, resolveVoiceTypeForMode(mode), {
+            rate: useVoiceModeStore.getState().speed,
+            pitch: 1,
+          })
+        }, 1400)
       }),
       socketManager.subscribe('winner.announced', (event: unknown) => {
         if (!isWinnerAnnouncedEvent(event)) return
@@ -266,6 +384,19 @@ export const useGameSocket = (gameId?: string): void => {
           winnerName: event.winner_name,
           timestamp: event.timestamp,
         })
+        const prizeLabel = prizeLabelFromWinnerEvent(event.prize_name)
+        const fallbackText = `Congratulations players. ${prizeLabel} prize has been won.`
+        const scheduledAt = Date.now()
+        window.setTimeout(() => {
+          if (!isActive) return
+          const seenAt = voiceEventSeenAt.get('winner_prize') ?? 0
+          if (seenAt >= scheduledAt) return
+          const mode = useVoiceModeStore.getState().mode
+          void queueSpeakText(fallbackText, resolveVoiceTypeForMode(mode), {
+            rate: useVoiceModeStore.getState().speed,
+            pitch: 1,
+          })
+        }, 900)
       }),
       socketManager.subscribe('announcement', (event: unknown) => {
         if (!isAnnouncementEvent(event)) return
@@ -281,6 +412,8 @@ export const useGameSocket = (gameId?: string): void => {
           gameId: normalizedGameId,
           message: event.message,
           timestamp: event.timestamp,
+          audioUrl: typeof event.audio_url === 'string' ? event.audio_url : undefined,
+          audioMimeType: typeof event.audio_mime_type === 'string' ? event.audio_mime_type : undefined,
         })
       }),
       socketManager.subscribe('VOICE_MODE_UPDATE', (event: unknown) => {
@@ -291,6 +424,51 @@ export const useGameSocket = (gameId?: string): void => {
         if (!isVoiceSpeedUpdateEvent(event)) return
         setVoiceSpeed(Number(event.voice_speed))
       }),
+      socketManager.subscribe('voice_event', (event: unknown) => {
+        if (!isVoiceEventSocketPayload(event)) return
+        const eventName = String(event.event || '').trim()
+        if (eventName) {
+          voiceEventSeenAt.set(eventName, Date.now())
+        }
+        const mediaUrl = resolveMediaAudioUrl(event.audio_url)
+        if (!mediaUrl) return
+
+        if (activeVoiceAudio) {
+          activeVoiceAudio.pause()
+          activeVoiceAudio.currentTime = 0
+          activeVoiceAudio = null
+        }
+
+        const audio = new Audio(mediaUrl)
+        audio.preload = 'auto'
+        activeVoiceAudio = audio
+        try {
+          window.dispatchEvent(
+            new CustomEvent('voice-event-playback-started', {
+              detail: { event: eventName || 'voice_event' },
+            }),
+          )
+        } catch {
+          // ignore
+        }
+        const clearActiveAudio = () => {
+          if (activeVoiceAudio === audio) {
+            activeVoiceAudio = null
+          }
+          try {
+            window.dispatchEvent(
+              new CustomEvent('voice-event-playback-ended', {
+                detail: { event: eventName || 'voice_event' },
+              }),
+            )
+          } catch {
+            // ignore
+          }
+        }
+        audio.onended = clearActiveAudio
+        audio.onerror = clearActiveAudio
+        void playAudioElementSafely(audio)
+      }),
       socketManager.on('reconnect', () => {
         void recoverState()
       }),
@@ -300,6 +478,11 @@ export const useGameSocket = (gameId?: string): void => {
     return () => {
       isActive = false
       unsubs.forEach((unsubscribe) => unsubscribe())
+      if (activeVoiceAudio) {
+        activeVoiceAudio.pause()
+        activeVoiceAudio.currentTime = 0
+        activeVoiceAudio = null
+      }
       socketManager.disconnect()
     }
   }, [

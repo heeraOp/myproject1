@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
+import TambolaTicketGrid from '@/components/common/TambolaTicketGrid'
 import AnnouncementBanner from '@/components/common/AnnouncementBanner'
 import GameMetaTopSheet from '@/components/common/GameMetaTopSheet'
+import LobbyAnnouncementModal from '@/components/common/LobbyAnnouncementModal'
 import { fetchCurrentPublicGame, fetchPublicSupportSettings } from '@/api/rest/games'
 import {
   fetchGameBusinessSummary,
@@ -12,11 +14,11 @@ import {
 import { fetchGameTickets, requestBulkTicketBooking } from '@/api/rest/tickets'
 import { socketManager } from '@/api/websocket/socketManager'
 import { useGameSocket } from '@/app/hooks/useGameSocket'
+import { useLobbyAnnouncementGate } from '@/app/hooks/useLobbyAnnouncementGate'
 import { useGameStore } from '@/app/store/game.store'
 import type { PublicGame } from '@/types/backend/game'
 import { normalizeTicketStatus, type PlayerTicket } from '@/types/backend/ticket'
 import { initGlobalAudioUnlock, unlockAudioFromUserGesture } from '@/utils/audioEngine'
-import { playWinnerSoundFlow } from '@/utils/soundManager'
 import { setAdminTheme } from '@/utils/theme'
 import { formatDateInIST, formatTimeInIST } from '@/utils/dateTime'
 import { playMusic, queueSpeakText, stopMusic } from '@/utils/speakText'
@@ -68,9 +70,19 @@ const PRE_GAME_ANNOUNCEMENTS: ReadonlyArray<{ thresholdMs: number; message: stri
 ]
 
 const toLobbyGameStatus = (status: string | undefined): PublicGame['status'] => {
-  if (status === 'FINISHED' || status === 'ENDED') return 'ENDED'
-  if (status === 'BOOKING_OPEN' || status === 'RUNNING' || status === 'PAUSED' || status === 'CREATED') {
-    return status
+  const normalized = String(status ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '_')
+
+  if (normalized === 'FINISHED' || normalized === 'ENDED') return 'ENDED'
+  if (
+    normalized === 'BOOKING_OPEN' ||
+    normalized === 'RUNNING' ||
+    normalized === 'PAUSED' ||
+    normalized === 'CREATED'
+  ) {
+    return normalized
   }
   return 'CREATED'
 }
@@ -201,20 +213,6 @@ const Lobby = () => {
   }, [])
 
   useGameSocket(selectedGame?.id || undefined)
-
-  const queuedWinner = useGameStore((state) => state.winnerQueue[0] ?? null)
-  const processedWinnerRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    if (!queuedWinner) return
-    const key = String(queuedWinner.id)
-    if (processedWinnerRef.current === key) return
-    processedWinnerRef.current = key
-    const name = queuedWinner.winner_name ?? 'Player'
-    const prize = queuedWinner.prize_name ?? 'Prize'
-    const announcement = `Congratulations ${name}! You won ${prize}.`
-    void playWinnerSoundFlow(announcement).catch(() => undefined)
-  }, [queuedWinner])
 
   const hydrateLobbyGame = useCallback(async () => {
     try {
@@ -588,6 +586,7 @@ const Lobby = () => {
     () => normalizeWhatsAppNumber(supportContact?.whatsapp_number ?? ''),
     [supportContact?.whatsapp_number],
   )
+  const lobbyAnnouncementGate = useLobbyAnnouncementGate(selectedGame?.id ?? null)
 
   const canContactSupport = hasValidCountryCode(supportDigits)
   const isBookingClosed = selectedGame?.status === 'ENDED' || selectedGame?.booking_status === 'CLOSED'
@@ -684,7 +683,7 @@ const Lobby = () => {
     const message = encodeURIComponent(
       `Hello ${supportName}, I have a question about Game ${selectedGame?.id ?? 'current'}`,
     )
-    window.open(`https://wa.me/${supportDigits}?text=${message}`, '_blank', 'noopener,noreferrer')
+    window.location.href = `https://api.whatsapp.com/send?phone=${supportDigits}&text=${message}`
     setSupportNotice('')
   }
 
@@ -913,13 +912,24 @@ const Lobby = () => {
         alignItems: 'center',
         justifyContent: 'flex-start',
       }}
-    >
+      >
+      <LobbyAnnouncementModal
+        open={lobbyAnnouncementGate.open}
+        title={lobbyAnnouncementGate.announcement?.title || 'Announcement'}
+        content={lobbyAnnouncementGate.announcement?.content || ''}
+        accepting={lobbyAnnouncementGate.accepting}
+        errorMessage={lobbyAnnouncementGate.errorMessage}
+        onAccept={() => void lobbyAnnouncementGate.accept()}
+      />
       {!showBookingDashboard && (
         <GameMetaTopSheet
           refreshKey={selectedGame?.id ?? null}
           gameNameOverride={selectedGame?.name ?? null}
           ticketPriceOverride={selectedGame?.ticket_price ?? null}
           gameStatusOverride={selectedGame?.status ?? null}
+          gameDateOverride={selectedGame?.date ?? null}
+          bookingStatusOverride={selectedGame?.booking_status ?? null}
+          websiteStatusOverride={selectedGame?.website_status ?? null}
         />
       )}
       <AnnouncementBanner gameId={selectedGame?.id || undefined} enableSound={soundEnabled} />
@@ -1246,14 +1256,7 @@ const Lobby = () => {
           )}
 
           {!loading && !error && orderedTickets.length > 0 && (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-                gap: '14px',
-                alignItems: 'start',
-              }}
-            >
+            <TambolaTicketGrid className="lobby-ticket-grid">
               {orderedTickets.map((ticket) => (
                 <TambolaTicketCard
                   key={ticket.ticket_number}
@@ -1264,7 +1267,7 @@ const Lobby = () => {
                   bookingClosed={isBookingClosed}
                 />
               ))}
-            </div>
+            </TambolaTicketGrid>
           )}
         </section>
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
+import TambolaTicketGrid from '@/components/common/TambolaTicketGrid'
 import {
   getGameSummary,
   getTickets,
@@ -178,14 +179,14 @@ const AdminTicketView = () => {
           {visibleTickets.length === 0 ? (
             <div className="admin-message">No tickets found for this view.</div>
           ) : (
-            <div>
+            <TambolaTicketGrid className="admin-ticket-grid">
               {visibleTickets.map((ticket) => (
                 <TambolaTicketCard
                   key={ticket.ticket_number}
                   ticket={ticket}
                 />
               ))}
-            </div>
+            </TambolaTicketGrid>
           )}
         </section>
       )}

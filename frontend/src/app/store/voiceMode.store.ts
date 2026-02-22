@@ -2,20 +2,26 @@ import { create } from 'zustand'
 
 export type VoiceMode =
   | 'CLASSIC'
+  | 'FEMALE_SHOUT'
   | 'FUNNY'
   | 'CRAZY'
   | 'MALE_DEEP'
   | 'MALE_ENERGETIC'
+  | 'ROYAL_COMMANDER'
+  | 'SPORTS_COMMENTATOR'
   | 'FUNNY_CARTOON'
   | 'FUNNY_COMEDIC'
   | 'FUNNY_CRAZY'
 
 export const VOICE_MODE_OPTIONS: ReadonlyArray<{ value: VoiceMode; label: string }> = [
   { value: 'CLASSIC', label: 'Classic (Female Mix)' },
+  { value: 'FEMALE_SHOUT', label: 'Female Shout' },
   { value: 'FUNNY', label: 'Funny (Legacy)' },
   { value: 'CRAZY', label: 'Crazy (Legacy)' },
   { value: 'MALE_DEEP', label: 'Male Deep' },
   { value: 'MALE_ENERGETIC', label: 'Male Energetic' },
+  { value: 'ROYAL_COMMANDER', label: 'Royal Commander' },
+  { value: 'SPORTS_COMMENTATOR', label: 'Sports Commentator' },
   { value: 'FUNNY_CARTOON', label: 'Funny Cartoon' },
   { value: 'FUNNY_COMEDIC', label: 'Funny Comedic' },
 ]
@@ -53,10 +59,13 @@ const SPEED_STORAGE_KEY = 'bingoVoiceSpeed'
 
 const isVoiceMode = (value: string): value is VoiceMode =>
   value === 'CLASSIC' ||
+  value === 'FEMALE_SHOUT' ||
   value === 'FUNNY' ||
   value === 'CRAZY' ||
   value === 'MALE_DEEP' ||
   value === 'MALE_ENERGETIC' ||
+  value === 'ROYAL_COMMANDER' ||
+  value === 'SPORTS_COMMENTATOR' ||
   value === 'FUNNY_CARTOON' ||
   value === 'FUNNY_COMEDIC' ||
   value === 'FUNNY_CRAZY'

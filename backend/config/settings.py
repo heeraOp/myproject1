@@ -211,6 +211,9 @@ USE_TZ = True
 # Public support fallback (used when a game has no assigned agent).
 SUPPORT_WHATSAPP_NAME = os.environ.get("SUPPORT_WHATSAPP_NAME", "Support")
 SUPPORT_WHATSAPP_NUMBER = os.environ.get("SUPPORT_WHATSAPP_NUMBER", "")
+WHATSAPP_DEFAULT_COUNTRY_CODE = "".join(
+    ch for ch in str(os.environ.get("WHATSAPP_DEFAULT_COUNTRY_CODE", "")).strip() if ch.isdigit()
+)
 
 
 # Static files (CSS, JavaScript, Images)
@@ -218,6 +221,8 @@ SUPPORT_WHATSAPP_NUMBER = os.environ.get("SUPPORT_WHATSAPP_NUMBER", "")
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 
 

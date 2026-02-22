@@ -124,6 +124,25 @@ export type AnnouncementResponse = {
   message: string
   timestamp: string
   game_id: string
+  audio_url?: string | null
+  audio_mime_type?: string | null
+}
+
+export type AdminLobbyAnnouncementResponse = {
+  id: number
+  lobby: string
+  title: string
+  content: string
+  version: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type AdminLobbyAnnouncementUpsertPayload = {
+  title: string
+  content: string
+  is_active?: boolean
 }
 
 const normalizeGameId = (value: string): string => value.trim().replace(/^\/+|\/+$/g, '')
@@ -473,21 +492,81 @@ export const updateActiveTheme = async (gameId: string, activeTheme: ThemeName) 
   return response.data
 }
 
+export const getAdminLobbyAnnouncement = async (
+  gameId: string,
+): Promise<AdminLobbyAnnouncementResponse | null> => {
+  const normalizedGameId = normalizeGameId(gameId)
+  if (!normalizedGameId) return null
+  const response = await adminApiClient.get<AdminLobbyAnnouncementResponse | null>(
+    `/games/admin/${normalizedGameId}/lobby-announcement/`,
+  )
+  if (!response.data) return null
+  return response.data
+}
+
+export const saveAdminLobbyAnnouncement = async (
+  gameId: string,
+  payload: AdminLobbyAnnouncementUpsertPayload,
+): Promise<AdminLobbyAnnouncementResponse> => {
+  const normalizedGameId = normalizeGameId(gameId)
+  const response = await adminApiClient.put<AdminLobbyAnnouncementResponse>(
+    `/games/admin/${normalizedGameId}/lobby-announcement/`,
+    payload,
+  )
+  return response.data
+}
+
 export const announceGame = async (
   gameId: string,
   message: string,
+  options?: {
+    audioClip?: Blob | null
+    audioFileName?: string
+  },
 ): Promise<AnnouncementResponse> => {
   const normalizedGameId = normalizeGameId(gameId)
-  // Optionally include an API key from env to authenticate announcement requests.
-  const apiKey = (import.meta.env.VITE_ANNOUNCE_API_KEY as string) || ''
-  const config = apiKey
-    ? { headers: { 'X-API-KEY': apiKey } }
+  const endpoint = `/games/${normalizedGameId}/announce/`
+  const apiKey = String((import.meta.env.VITE_ANNOUNCE_API_KEY as string) || '').trim()
+
+  const hasAudioClip = Boolean(options?.audioClip)
+  const payload = hasAudioClip
+    ? (() => {
+        const formData = new FormData()
+        const trimmedMessage = String(message || '').trim()
+        if (trimmedMessage) {
+          formData.append('message', trimmedMessage)
+        }
+        formData.append(
+          'audio_clip',
+          options?.audioClip as Blob,
+          options?.audioFileName || 'announcement.webm',
+        )
+        return formData
+      })()
+    : { message: String(message || '').trim() }
+
+  const requestHeaders = hasAudioClip
+    ? { 'Content-Type': 'multipart/form-data' }
     : undefined
 
+  if (apiKey) {
+    try {
+      const response = await adminApiClient.post<AnnouncementResponse>(
+        endpoint,
+        payload,
+        { headers: { ...requestHeaders, 'X-API-KEY': apiKey } },
+      )
+      return response.data
+    } catch {
+      // Some deployments reject custom headers via CORS/proxy config.
+      // Fall back to standard session-auth request.
+    }
+  }
+
   const response = await adminApiClient.post<AnnouncementResponse>(
-    `/games/${normalizedGameId}/announce/`,
-    { message },
-    config,
+    endpoint,
+    payload,
+    requestHeaders ? { headers: requestHeaders } : undefined,
   )
   return response.data
 }

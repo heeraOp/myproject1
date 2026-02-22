@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { memo, useMemo } from 'react'
 import { normalizeTicketStatus, type PlayerTicket } from '@/types/backend/ticket'
 import './TambolaTicketCard.css'
 
@@ -54,13 +54,13 @@ const TambolaTicketCard = ({
   }
 
   return (
-    <article className="ticket-card">
-      <header className="ticket-card__header">
-        <span className="ticket-owner">{ownerLabel}</span>
+    <article className="tambola-ticket-card">
+      <header className="tambola-ticket-card__header">
+        <span className="tambola-ticket-card__owner">{ownerLabel}</span>
         {variant === 'player' && isAvailable && onRequestBooking ? (
           <button
             type="button"
-            className="ticket-request-btn"
+            className="tambola-ticket-card__request-btn"
             onClick={() => onRequestBooking(ticket)}
             disabled={isRequesting || bookingClosed}
           >
@@ -68,7 +68,7 @@ const TambolaTicketCard = ({
           </button>
         ) : (
           <span
-            className={`ticket-status ${
+            className={`tambola-ticket-card__status ${
               isConfirmed ? 'booked' : isPending ? 'pending' : 'open'
             }`}
           >
@@ -77,18 +77,18 @@ const TambolaTicketCard = ({
         )}
       </header>
       {variant === 'player' && isPending && (requestedByName || requestedByWhatsapp) ? (
-        <div className="ticket-pending-meta">
+        <div className="tambola-ticket-card__pending-meta">
           {requestedByName ? `Name: ${requestedByName}` : ''} {requestedByWhatsapp ? `WhatsApp: ${requestedByWhatsapp}` : ''}
         </div>
       ) : null}
-      <div className="ticket-grid-wrapper">
-        <div className="ticket-grid">
+      <div className="tambola-ticket-card__body">
+        <div className="tambola-ticket-card__grid">
           {ticket.ticket_data.rows.map((row, rowIndex) =>
             row.map((value, cellIndex) => {
               const isMarked = value !== null && markedSet.has(value)
               return (
                 <div
-                  className={`ticket-cell ${isMarked ? 'called' : ''}`}
+                  className={`tambola-ticket-card__cell ${isMarked ? 'is-called' : ''} ${value === null ? 'is-empty' : ''}`}
                   key={`${ticket.ticket_number}-${rowIndex}-${cellIndex}`}
                 >
                   {value ?? ''}
@@ -97,10 +97,9 @@ const TambolaTicketCard = ({
             }),
           )}
         </div>
-        <div className="ticket-side-strip" />
       </div>
     </article>
   )
 }
 
-export default TambolaTicketCard
+export default memo(TambolaTicketCard)

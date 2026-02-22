@@ -4,7 +4,7 @@ import {
   playAudioElementSafely,
 } from '@/utils/audioEngine'
 
-export type VoiceType = 'normal' | 'savage' | 'funny' | 'dramatic'
+export type VoiceType = 'normal' | 'savage' | 'funny' | 'dramatic' | 'female_shout'
 
 type MusicOptions = {
   loop?: boolean
@@ -24,13 +24,6 @@ type EffectOptions = {
 type SpeechPlaybackStyle = {
   rate?: number
   pitch?: number
-}
-
-type SpeechEnv = {
-  VITE_ELEVENLABS_API_KEY?: string
-  VITE_ELEVEN_API_KEY?: string
-  VITE_ELEVENLABS_VOICE_ID?: string
-  VITE_ELEVEN_VOICE_ID?: string
 }
 
 let speechAudio: HTMLAudioElement | null = null
@@ -59,7 +52,6 @@ const buildVoiceUrl = (text: string, voiceType: VoiceType): string => {
 
 const clampVolume = (value: number): number => Math.max(0, Math.min(1, value))
 const clampRate = (value: number): number => Math.max(0.8, Math.min(1.55, value))
-const clampPitch = (value: number): number => Math.max(0.5, Math.min(2, value))
 
 const resolveAudioPlaybackRate = (style: SpeechPlaybackStyle = {}): number => {
   const rate = Number(style.rate)
@@ -71,109 +63,6 @@ const clearSpeechObjectUrl = () => {
   if (!speechObjectUrl) return
   URL.revokeObjectURL(speechObjectUrl)
   speechObjectUrl = null
-}
-
-const selectWebSpeechVoice = (
-  voices: SpeechSynthesisVoice[],
-  voiceType: VoiceType,
-): SpeechSynthesisVoice | null => {
-  if (!voices.length) return null
-  const englishVoices = voices.filter((voice) => /^en([-_]|$)/i.test(voice.lang || ''))
-  const pool = englishVoices.length > 0 ? englishVoices : voices
-
-  const findByName = (keywords: string[]): SpeechSynthesisVoice | null => {
-    const lowered = keywords.map((keyword) => keyword.toLowerCase())
-    return (
-      pool.find((voice) => {
-        const name = String(voice.name || '').toLowerCase()
-        const uri = String(voice.voiceURI || '').toLowerCase()
-        return lowered.some((keyword) => name.includes(keyword) || uri.includes(keyword))
-      }) ?? null
-    )
-  }
-
-  if (voiceType === 'dramatic' || voiceType === 'savage') {
-    const deepVoice = findByName(['male', 'deep', 'david', 'mark', 'daniel'])
-    if (deepVoice) return deepVoice
-  }
-
-  if (voiceType === 'funny') {
-    const lightVoice = findByName(['female', 'samantha', 'google uk english female', 'zira'])
-    if (lightVoice) return lightVoice
-  }
-
-  const defaultVoice = pool.find((voice) => voice.default)
-  if (defaultVoice) return defaultVoice
-  return pool[0] ?? null
-}
-
-const speakWithWebSpeech = async (
-  inputText: string,
-  voiceType: VoiceType,
-  style: SpeechPlaybackStyle = {},
-): Promise<boolean> => {
-  if (typeof window === 'undefined') return false
-  if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') return false
-
-  const text = String(inputText || '').trim()
-  if (!text) return false
-
-  const synth = window.speechSynthesis
-  try {
-    synth.resume()
-  } catch {
-    // ignore
-  }
-
-  return new Promise<boolean>((resolve) => {
-    let settled = false
-    const utterance = new SpeechSynthesisUtterance(text)
-    const voices = synth.getVoices()
-    const selectedVoice = selectWebSpeechVoice(voices, voiceType)
-    if (selectedVoice) {
-      utterance.voice = selectedVoice
-      if (selectedVoice.lang) {
-        utterance.lang = selectedVoice.lang
-      }
-    }
-
-    const fallbackRate =
-      voiceType === 'funny' ? 1.07 : voiceType === 'savage' ? 1.04 : voiceType === 'dramatic' ? 1.02 : 1
-    const fallbackPitch = voiceType === 'funny' ? 1.12 : 1
-    utterance.rate = clampRate(Number.isFinite(Number(style.rate)) ? Number(style.rate) : fallbackRate)
-    utterance.pitch = clampPitch(Number.isFinite(Number(style.pitch)) ? Number(style.pitch) : fallbackPitch)
-    utterance.volume = 1
-
-    const finish = (ok: boolean) => {
-      if (settled) return
-      settled = true
-      window.clearTimeout(safetyTimer)
-      utterance.onend = null
-      utterance.onerror = null
-      resolve(ok)
-    }
-
-    utterance.onend = () => finish(true)
-    utterance.onerror = () => finish(false)
-
-    const safetyTimer = window.setTimeout(() => {
-      finish(Boolean(synth.speaking || synth.pending))
-    }, Math.max(4500, Math.min(18000, text.length * 140)))
-
-    try {
-      synth.cancel()
-      synth.speak(utterance)
-    } catch {
-      finish(false)
-      return
-    }
-
-    window.setTimeout(() => {
-      if (!synth.speaking && !synth.pending) {
-        finish(false)
-      }
-    }, 220)
-  })
 }
 
 const clearMusicFade = () => {
@@ -342,13 +231,6 @@ export const stopSpeaking = () => {
     speechAudio = null
   }
   clearSpeechObjectUrl()
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-    try {
-      window.speechSynthesis.cancel()
-    } catch {
-      // ignore
-    }
-  }
 }
 
 export const isWinnerSoundFlowActive = (): boolean => winnerSoundFlowActiveCount > 0
@@ -368,106 +250,41 @@ export const speakText = async (
   const controller = new AbortController()
   speechRequestController = controller
   try {
-    // If an ElevenLabs API key is provided via Vite env, use the ElevenLabs
-    // text-to-speech API directly from the client and play the returned audio.
-    // This path is preferred for production when the deploy provides the key.
-    const env = (import.meta.env as SpeechEnv) || {}
-    const elevenKey = env.VITE_ELEVENLABS_API_KEY || env.VITE_ELEVEN_API_KEY || ''
-    const elevenVoiceId =
-      env.VITE_ELEVENLABS_VOICE_ID || env.VITE_ELEVEN_VOICE_ID || 'alloy'
+    const response = await fetch(buildVoiceUrl(text, voiceType), {
+      method: 'GET',
+      credentials: 'include',
+      signal: controller.signal,
+    })
+    if (!response.ok) return false
 
-    if (elevenKey) {
-      try {
-        const elevenUrl = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
-          elevenVoiceId,
-        )}/stream`
+    const blob = await response.blob()
+    if (!blob.size || speechRequestController !== controller) return false
 
-        const response = await fetch(elevenUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'xi-api-key': elevenKey,
-            Accept: 'audio/mpeg',
-          },
-          body: JSON.stringify({ text }),
-          signal: controller.signal,
-        })
+    const objectUrl = URL.createObjectURL(blob)
+    speechObjectUrl = objectUrl
 
-        if (response.ok) {
-          const blob = await response.blob()
-          if (blob.size && speechRequestController === controller) {
-            const objectUrl = URL.createObjectURL(blob)
-            speechObjectUrl = objectUrl
+    const audio = new Audio(objectUrl)
+    audio.playbackRate = resolveAudioPlaybackRate(style)
+    speechAudio = audio
 
-            const audio = new Audio(objectUrl)
-            audio.playbackRate = resolveAudioPlaybackRate(style)
-            speechAudio = audio
-
-            const finalize = () => {
-              if (speechAudio === audio) {
-                speechAudio = null
-              }
-              clearSpeechObjectUrl()
-            }
-
-            audio.onended = finalize
-            audio.onerror = finalize
-
-            const played = await playAudioElementSafely(audio)
-            if (played) {
-              return true
-            }
-            finalize()
-          }
-        }
-      } catch {
-        // Continue to backend/web-speech fallback.
+    const finalize = () => {
+      if (speechAudio === audio) {
+        speechAudio = null
       }
+      clearSpeechObjectUrl()
     }
 
-    // No ElevenLabs key configured — attempt backend TTS endpoint.
-    // If unavailable, gracefully fall back to browser speech synthesis.
-    try {
-      const response = await fetch(buildVoiceUrl(text, voiceType), {
-        method: 'GET',
-        credentials: 'include',
-        signal: controller.signal,
-      })
-      if (response.ok) {
-        const blob = await response.blob()
-        if (blob.size && speechRequestController === controller) {
-          const objectUrl = URL.createObjectURL(blob)
-          speechObjectUrl = objectUrl
+    audio.onended = finalize
+    audio.onerror = finalize
 
-          const audio = new Audio(objectUrl)
-          audio.playbackRate = resolveAudioPlaybackRate(style)
-          speechAudio = audio
-
-          const finalize = () => {
-            if (speechAudio === audio) {
-              speechAudio = null
-            }
-            clearSpeechObjectUrl()
-          }
-
-          audio.onended = finalize
-          audio.onerror = finalize
-
-          const played = await playAudioElementSafely(audio)
-          if (!played) {
-            finalize()
-            return false
-          }
-          return true
-        }
-      }
-    } catch {
-      // fallback below
+    const played = await playAudioElementSafely(audio)
+    if (!played) {
+      finalize()
+      return false
     }
-
-    if (speechRequestController !== controller) return false
-    const fallbackPlayed = await speakWithWebSpeech(text, voiceType, style)
-    return fallbackPlayed
+    return true
+  } catch {
+    return false
   } finally {
     if (speechRequestController === controller) {
       speechRequestController = null

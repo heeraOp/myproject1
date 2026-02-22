@@ -152,15 +152,6 @@ export const unlockAudioFromUserGesture = async (): Promise<boolean> => {
     setGlobalAudioUnlocked(true)
     detachUnlockListeners()
   }
-
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-    try {
-      window.speechSynthesis.resume()
-      window.speechSynthesis.getVoices()
-    } catch {
-      // Ignore speech engine probe failures.
-    }
-  }
   return unlocked
 }
 

@@ -12,14 +12,14 @@
   position: sticky;
   top: 8px;
   margin: 0 auto 10px;
-  width: min(1100px, calc(100vw - 20px));
+  width: min(1080px, calc(100vw - 24px));
   z-index: 40;
   pointer-events: none;
 }
 
 .game-meta-compact {
-  width: 100%;
-  min-height: 56px;
+  width: calc(100% - 20px);
+  min-height: 74px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 16px;
   background:
@@ -29,53 +29,95 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 14px;
+  padding: 11px 14px;
   text-align: left;
   pointer-events: auto;
   cursor: pointer;
+  margin: 0 auto;
 }
 
 .game-meta-compact__left {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .game-meta-trophy {
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
-  background: rgba(255, 208, 18, 0.18);
+  background: rgba(255, 208, 18, 0.24);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: 18px;
   flex: 0 0 auto;
 }
 
-.game-meta-compact__text {
-  display: block;
+.game-meta-compact__text-wrap {
+  display: grid;
+  gap: 2px;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: 14px;
+}
+
+.game-meta-compact__eyebrow {
+  display: block;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.game-meta-compact__headline {
+  display: block;
+  font-size: clamp(20px, 2.1vw, 26px);
+  line-height: 1.04;
+  font-weight: 900;
+  letter-spacing: 0.45px;
+  color: rgba(255, 255, 255, 0.98);
 }
 
 .game-meta-compact__right {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 10px;
   flex: 0 0 auto;
 }
 
+.game-meta-info-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(115, 185, 255, 0.72);
+  background: linear-gradient(130deg, rgba(37, 103, 214, 0.92) 0%, rgba(17, 49, 121, 0.92) 100%);
+  box-shadow:
+    0 10px 22px rgba(10, 20, 46, 0.52),
+    0 0 0 1px rgba(255, 255, 255, 0.09) inset;
+  transition: transform 220ms ease, box-shadow 220ms ease;
+}
+
+.game-meta-info-pill.is-open {
+  transform: translateY(-1px) scale(1.02);
+  box-shadow:
+    0 14px 26px rgba(10, 20, 46, 0.58),
+    0 0 0 1px rgba(255, 255, 255, 0.14) inset;
+}
+
+.game-meta-info-pill__label {
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  color: #f4f8ff;
+  white-space: nowrap;
+}
+
 .game-meta-live-dot {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
   border-radius: 999px;
   background: rgba(189, 193, 204, 0.95);
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
@@ -89,23 +131,22 @@
 }
 
 .game-meta-info-icon {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.32);
-  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.16);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 800;
   line-height: 1;
-  text-transform: lowercase;
   transition: transform 300ms ease-in-out;
 }
 
 .game-meta-info-icon.is-open {
-  transform: rotate(180deg);
+  transform: rotate(45deg);
 }
 
 .game-meta-panel {
@@ -209,6 +250,35 @@
   color: rgba(255, 255, 255, 0.95);
 }
 
+.game-meta-kv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.game-meta-kv-card {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 9px 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.game-meta-kv-card span {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 700;
+}
+
+.game-meta-kv-card strong {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.98);
+  font-weight: 800;
+}
+
 .game-meta-note {
   margin: 0 0 10px;
   font-size: 13px;
@@ -307,9 +377,22 @@
   border-color: rgba(23, 45, 76, 0.2);
 }
 
+:root[data-theme='light'] .game-meta-compact__eyebrow {
+  color: rgba(29, 42, 66, 0.7);
+}
+
+:root[data-theme='light'] .game-meta-compact__headline {
+  color: #132746;
+}
+
+:root[data-theme='light'] .game-meta-info-pill {
+  border-color: rgba(31, 80, 168, 0.52);
+  background: linear-gradient(130deg, rgba(68, 135, 242, 0.94) 0%, rgba(32, 84, 173, 0.94) 100%);
+}
+
 :root[data-theme='light'] .game-meta-info-icon {
-  border-color: rgba(29, 42, 66, 0.36);
-  background: rgba(29, 42, 66, 0.08);
+  border-color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.21);
 }
 
 :root[data-theme='light'] .game-meta-panel {
@@ -338,6 +421,19 @@
   background: rgba(236, 245, 255, 0.62);
 }
 
+:root[data-theme='light'] .game-meta-kv-card {
+  border-color: rgba(31, 57, 93, 0.18);
+  background: rgba(236, 245, 255, 0.68);
+}
+
+:root[data-theme='light'] .game-meta-kv-card span {
+  color: rgba(29, 42, 66, 0.74);
+}
+
+:root[data-theme='light'] .game-meta-kv-card strong {
+  color: #1d2a42;
+}
+
 :root[data-theme='light'] .game-meta-section {
   border-bottom-color: rgba(31, 57, 93, 0.1);
 }
@@ -350,23 +446,39 @@
 @media (max-width: 720px) {
   .game-meta-top-sheet {
     top: 6px;
-    width: calc(100vw - 20px);
+    width: calc(100vw - 18px);
   }
 
   .game-meta-compact {
-    min-height: 52px;
+    width: calc(100% - 10px);
+    min-height: 64px;
     border-radius: 14px;
-    padding: 9px 10px;
+    padding: 10px 10px;
   }
 
-  .game-meta-compact__text {
-    font-size: 12px;
+  .game-meta-compact__eyebrow {
+    font-size: 10px;
+    letter-spacing: 0.8px;
+  }
+
+  .game-meta-compact__headline {
+    font-size: clamp(16px, 5.3vw, 21px);
   }
 
   .game-meta-info-icon {
-    width: 26px;
-    height: 26px;
-    font-size: 14px;
+    width: 22px;
+    height: 22px;
+    font-size: 16px;
+  }
+
+  .game-meta-info-pill {
+    gap: 8px;
+    padding: 7px 9px 7px 8px;
+  }
+
+  .game-meta-info-pill__label {
+    font-size: 11px;
+    letter-spacing: 0.6px;
   }
 
   .game-meta-panel {
@@ -376,6 +488,11 @@
 
   .game-meta-section {
     padding: 14px 12px;
+  }
+
+  .game-meta-kv-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .game-meta-agent {

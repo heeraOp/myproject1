@@ -3,7 +3,6 @@ import confetti from 'canvas-confetti'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useGameStore } from '@/app/store/game.store'
 import { initGlobalAudioUnlock, playAudioElementSafely } from '@/utils/audioEngine'
-import { playWinnerSoundFlow } from '@/utils/soundManager'
 import './WinnerCelebrationOverlay.css'
 
 const AUTO_DISMISS_MS = 3000
@@ -98,8 +97,6 @@ const WinnerCelebrationOverlay = () => {
       audioRef.current.pause()
       audioRef.current.currentTime = 0
       void playAudioElementSafely(audioRef.current)
-      const announcementText = `${activeWinner.winner_name ?? 'Player'} has won ${prizeLabel}`
-      void playWinnerSoundFlow(announcementText)
     }
   }, [activeWinner?.id, activeWinner, dismissWinnerAnnouncement])
 

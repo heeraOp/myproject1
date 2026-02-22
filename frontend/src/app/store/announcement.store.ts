@@ -7,6 +7,8 @@ export type AnnouncementItem = {
   gameId: string
   message: string
   timestamp: string
+  audioUrl?: string
+  audioMimeType?: string
   type?: AnnouncementType
 }
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { logoutCurrentUser } from '@/api/rest/auth'
 import {
+  type AdminLobbyAnnouncementResponse,
   type AgentOption,
   type AdminGameListItem,
   announceGame,
@@ -9,6 +10,7 @@ import {
   confirmTicketRequest,
   createAgent,
   createGamePrizes,
+  getAdminLobbyAnnouncement,
   fetchAgents,
   getCurrentAdminGame,
   deleteGamePrize,
@@ -28,6 +30,7 @@ import {
   releaseAdminTicket,
   resumeGame,
   saveGameSettings,
+  saveAdminLobbyAnnouncement,
   startGame,
   updateAdminTicket,
   updateActiveTheme,
@@ -50,6 +53,7 @@ import {
   VOICE_SPEED_OPTIONS,
 } from '@/app/store/voiceMode.store'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
+import TambolaTicketGrid from '@/components/common/TambolaTicketGrid'
 import { socketManager } from '@/api/websocket/socketManager'
 import { jsPDF } from 'jspdf'
 import { normalizeTicketStatus } from '@/types/backend/ticket'
@@ -61,6 +65,7 @@ import {
   toggleAdminTheme,
 } from '@/utils/theme'
 import { formatDateTimeInIST, toDateTimeLocalInputInIST } from '@/utils/dateTime'
+import { encodeVoiceAnnouncement } from '@/utils/announcementVoice'
 import { wallpaperRegistry, resolveWallpaperTheme } from '@/theme/wallpaperRegistry'
 import './AdminDashboard.css'
 import FloatingBookButton from '@/components/admin/FloatingBookButton'
@@ -106,6 +111,53 @@ type GameRecreatedSocketPayload = {
   new_game_id?: string
   reason?: string
   new_game?: AdminGameListItem
+}
+
+type BrowserSpeechTranscript = {
+  transcript?: string
+}
+
+type BrowserSpeechResult = {
+  isFinal?: boolean
+  0?: BrowserSpeechTranscript
+  [index: number]: BrowserSpeechTranscript | undefined
+}
+
+type BrowserSpeechResultList = {
+  length: number
+  [index: number]: BrowserSpeechResult | undefined
+}
+
+type BrowserSpeechRecognitionEvent = {
+  results: BrowserSpeechResultList
+}
+
+type BrowserSpeechRecognitionErrorEvent = {
+  error?: string
+}
+
+type BrowserSpeechRecognition = {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null
+  onerror: ((event: BrowserSpeechRecognitionErrorEvent) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognition
+
+type BrowserSpeechWindow = Window & {
+  SpeechRecognition?: BrowserSpeechRecognitionCtor
+  webkitSpeechRecognition?: BrowserSpeechRecognitionCtor
+}
+
+const getSpeechRecognitionCtor = (): BrowserSpeechRecognitionCtor | null => {
+  if (typeof window === 'undefined') return null
+  const speechWindow = window as BrowserSpeechWindow
+  return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null
 }
 
 type AgentEditorForm = {
@@ -213,21 +265,74 @@ const formatDateTime = (value?: string): string => {
   return formatDateTimeInIST(value)
 }
 
+const supportsVoiceRecording = (): boolean =>
+  typeof window !== 'undefined' &&
+  typeof MediaRecorder !== 'undefined' &&
+  typeof navigator !== 'undefined' &&
+  Boolean(navigator.mediaDevices?.getUserMedia)
+
+const resolveVoiceRecorderMimeType = (): string => {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return ''
+  }
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+  ]
+  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? ''
+}
+
+const getVoiceRecordingExtension = (mimeType: string): string => {
+  const normalized = String(mimeType || '').toLowerCase()
+  if (normalized.includes('ogg')) return 'ogg'
+  if (normalized.includes('mpeg') || normalized.includes('mp3')) return 'mp3'
+  if (normalized.includes('wav')) return 'wav'
+  if (normalized.includes('aac')) return 'aac'
+  if (normalized.includes('mp4') || normalized.includes('m4a')) return 'm4a'
+  return 'webm'
+}
+
 const NumberBoard = ({ calledNumbers }: { calledNumbers: number[] }) => {
   const calledSet = useMemo(() => new Set(calledNumbers), [calledNumbers])
   return (
-    <div className="number-board">
-      {Array.from({ length: 90 }, (_, index) => {
-        const value = index + 1
-        return (
-          <div
-            key={value}
-            className={`number-board__cell ${calledSet.has(value) ? 'called' : ''}`}
-          >
-            {value}
+    <div className="number-board-wrap">
+      <div className="number-board">
+        {Array.from({ length: 90 }, (_, index) => {
+          const value = index + 1
+          return (
+            <div
+              key={value}
+              className={`number-board__cell ${calledSet.has(value) ? 'called' : ''}`}
+            >
+              {value}
+            </div>
+          )
+        })}
+      </div>
+      <div className="number-board-last-called">
+        <div className="number-board-last-called__head">
+          <span>Last Called Numbers</span>
+          <strong>{calledNumbers.length}</strong>
+        </div>
+        {calledNumbers.length > 0 ? (
+          <div className="number-board-last-called__grid">
+            {calledNumbers.map((value, index) => {
+              const isLatest = index === calledNumbers.length - 1
+              return (
+                <div
+                  key={`${value}-${index}`}
+                  className={`number-board-last-called__chip ${isLatest ? 'latest' : ''}`}
+                >
+                  {value}
+                </div>
+              )
+            })}
           </div>
-        )
-      })}
+        ) : (
+          <p className="number-board-last-called__empty">No numbers called yet.</p>
+        )}
+      </div>
     </div>
   )
 }
@@ -263,12 +368,29 @@ const AdminDashboard = () => {
   const [loggingOut, setLoggingOut] = useState(false)
   const [pendingActionTicketId, setPendingActionTicketId] = useState<string | null>(null)
   const [pendingActionType, setPendingActionType] = useState<'approve' | 'reject' | null>(null)
+  const [bulkApproveInProgress, setBulkApproveInProgress] = useState(false)
   const [ticketManageActionTicketId, setTicketManageActionTicketId] = useState<string | null>(null)
   const [ticketManageActionType, setTicketManageActionType] = useState<
     'book' | 'edit' | 'remove' | null
   >(null)
   const [sendingAnnouncement, setSendingAnnouncement] = useState(false)
+  const [announcementSendMode, setAnnouncementSendMode] = useState<'text' | 'voice' | null>(null)
   const [announcementText, setAnnouncementText] = useState('')
+  const [lobbyAnnouncementTitle, setLobbyAnnouncementTitle] = useState('')
+  const [lobbyAnnouncementContent, setLobbyAnnouncementContent] = useState('')
+  const [lobbyAnnouncementVersion, setLobbyAnnouncementVersion] = useState<number | null>(null)
+  const [lobbyAnnouncementActive, setLobbyAnnouncementActive] = useState(true)
+  const [loadingLobbyAnnouncement, setLoadingLobbyAnnouncement] = useState(false)
+  const [savingLobbyAnnouncement, setSavingLobbyAnnouncement] = useState(false)
+  const [micSupported, setMicSupported] = useState<boolean>(() => Boolean(getSpeechRecognitionCtor()))
+  const [micListening, setMicListening] = useState(false)
+  const [voiceRecordingSupported, setVoiceRecordingSupported] = useState<boolean>(() =>
+    supportsVoiceRecording(),
+  )
+  const [recordingVoiceAnnouncement, setRecordingVoiceAnnouncement] = useState(false)
+  const [recordedVoiceAnnouncementBlob, setRecordedVoiceAnnouncementBlob] = useState<Blob | null>(null)
+  const [recordedVoiceAnnouncementMimeType, setRecordedVoiceAnnouncementMimeType] = useState('')
+  const [recordedVoiceAnnouncementUrl, setRecordedVoiceAnnouncementUrl] = useState('')
   const [showTicketCards, setShowTicketCards] = useState(false)
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true
@@ -295,6 +417,11 @@ const AdminDashboard = () => {
     name: '',
     whatsapp_number: '',
   })
+  const announcementRecognitionRef = useRef<BrowserSpeechRecognition | null>(null)
+  const announcementVoiceRecorderRef = useRef<MediaRecorder | null>(null)
+  const announcementVoiceStreamRef = useRef<MediaStream | null>(null)
+  const announcementVoiceChunksRef = useRef<Blob[]>([])
+  const recordedVoiceAnnouncementUrlRef = useRef('')
   const handleThemeToggle = async () => {
     if (!gameId) {
       setActionMessage('Select a game to update the theme.')
@@ -311,6 +438,46 @@ const AdminDashboard = () => {
       setTheme(previous)
     }
   }
+
+  const applyLobbyAnnouncementState = useCallback(
+    (announcement: AdminLobbyAnnouncementResponse | null) => {
+      if (!announcement) {
+        setLobbyAnnouncementTitle('')
+        setLobbyAnnouncementContent('')
+        setLobbyAnnouncementVersion(null)
+        setLobbyAnnouncementActive(true)
+        return
+      }
+      setLobbyAnnouncementTitle(String(announcement.title ?? ''))
+      setLobbyAnnouncementContent(String(announcement.content ?? ''))
+      setLobbyAnnouncementVersion(
+        typeof announcement.version === 'number' ? announcement.version : null,
+      )
+      setLobbyAnnouncementActive(Boolean(announcement.is_active))
+    },
+    [],
+  )
+
+  const clearRecordedVoiceAnnouncement = useCallback(() => {
+    if (recordedVoiceAnnouncementUrl) {
+      URL.revokeObjectURL(recordedVoiceAnnouncementUrl)
+    }
+    recordedVoiceAnnouncementUrlRef.current = ''
+    setRecordedVoiceAnnouncementUrl('')
+    setRecordedVoiceAnnouncementBlob(null)
+    setRecordedVoiceAnnouncementMimeType('')
+  }, [recordedVoiceAnnouncementUrl])
+
+  const releaseVoiceRecorderResources = useCallback(() => {
+    if (announcementVoiceStreamRef.current) {
+      announcementVoiceStreamRef.current.getTracks().forEach((track) => {
+        track.stop()
+      })
+      announcementVoiceStreamRef.current = null
+    }
+    announcementVoiceRecorderRef.current = null
+    announcementVoiceChunksRef.current = []
+  }, [])
 
   useEffect(() => {
     return subscribeThemeChange(({ theme: updatedTheme }) => {
@@ -403,6 +570,45 @@ const AdminDashboard = () => {
     if (typeof window === 'undefined') return
     window.localStorage.setItem('housie_admin_sound_enabled', soundEnabled ? '1' : '0')
   }, [soundEnabled])
+
+  useEffect(() => {
+    recordedVoiceAnnouncementUrlRef.current = recordedVoiceAnnouncementUrl
+  }, [recordedVoiceAnnouncementUrl])
+
+  useEffect(() => {
+    setMicSupported(Boolean(getSpeechRecognitionCtor()))
+    setVoiceRecordingSupported(supportsVoiceRecording())
+    return () => {
+      if (announcementRecognitionRef.current) {
+        try {
+          announcementRecognitionRef.current.stop()
+        } catch {
+          // ignore
+        }
+        announcementRecognitionRef.current = null
+      }
+
+      const recorder = announcementVoiceRecorderRef.current
+      if (recorder) {
+        recorder.ondataavailable = null
+        recorder.onstop = null
+        recorder.onerror = null
+        if (recorder.state !== 'inactive') {
+          try {
+            recorder.stop()
+          } catch {
+            // ignore
+          }
+        }
+      }
+      releaseVoiceRecorderResources()
+
+      if (recordedVoiceAnnouncementUrlRef.current) {
+        URL.revokeObjectURL(recordedVoiceAnnouncementUrlRef.current)
+        recordedVoiceAnnouncementUrlRef.current = ''
+      }
+    }
+  }, [releaseVoiceRecorderResources])
 
   useEffect(() => {
     gamesRef.current = games
@@ -598,6 +804,37 @@ const AdminDashboard = () => {
     if (!gameId) return
     void loadAll(gameId)
   }, [gameId, loadAll])
+
+  useEffect(() => {
+    let mounted = true
+    const loadLobbyAnnouncement = async () => {
+      if (!gameId) {
+        applyLobbyAnnouncementState(null)
+        setLoadingLobbyAnnouncement(false)
+        return
+      }
+
+      setLoadingLobbyAnnouncement(true)
+      try {
+        const payload = await getAdminLobbyAnnouncement(gameId)
+        if (!mounted) return
+        applyLobbyAnnouncementState(payload)
+      } catch (loadError) {
+        if (!mounted) return
+        applyLobbyAnnouncementState(null)
+        setActionMessage(`Unable to load lobby announcement: ${getErrorMessage(loadError)}`)
+      } finally {
+        if (mounted) {
+          setLoadingLobbyAnnouncement(false)
+        }
+      }
+    }
+
+    void loadLobbyAnnouncement()
+    return () => {
+      mounted = false
+    }
+  }, [applyLobbyAnnouncementState, gameId])
 
   useEffect(() => {
     if (!gameId || storeGameId !== gameId) return
@@ -973,11 +1210,10 @@ const AdminDashboard = () => {
     // Fire-and-forget: failures should not block local UI flow.
     pendingWinners.forEach((winner) => {
       try {
-        const name = winner.player_name ?? 'Player'
         const prize = winner.prize_type
           ? PRIZE_LABEL_MAP[winner.prize_type] ?? winner.prize_type
           : 'Prize'
-        const message = `${name} has won ${prize} (Ticket #${winner.ticket_number ?? 'N/A'}).`
+        const message = `Congratulations players. ${prize} prize has been won.`
         void announceGame(gameId, message).catch(() => undefined)
       } catch {
         // ignore
@@ -1325,6 +1561,58 @@ const AdminDashboard = () => {
     }
   }
 
+  const handleApproveAllPendingRequests = async () => {
+    if (!gameId) return
+    if (bookingActionsDisabled) {
+      setActionMessage('Ticket booking actions are disabled while the game is running or finished.')
+      return
+    }
+    if (bulkApproveInProgress) return
+
+    const approvable = pendingTickets.filter((ticket) => Boolean(ticket.id))
+    if (approvable.length === 0) {
+      setActionMessage('No pending requests with valid ticket ids to approve.')
+      return
+    }
+
+    const proceed = window.confirm(`Approve all ${approvable.length} pending ticket requests?`)
+    if (!proceed) return
+
+    setBulkApproveInProgress(true)
+    setActionMessage('')
+
+    let approvedCount = 0
+    const failedTicketNumbers: number[] = []
+
+    try {
+      for (const ticket of approvable) {
+        try {
+          await confirmTicketRequest(ticket.id as string)
+          approvedCount += 1
+        } catch {
+          failedTicketNumbers.push(ticket.ticket_number)
+        }
+      }
+
+      await refreshTicketsAndBusiness(gameId)
+      setSearchKeyword('')
+
+      if (failedTicketNumbers.length === 0) {
+        setActionMessage(`Approved ${approvedCount} pending ticket requests.`)
+      } else {
+        const preview = failedTicketNumbers.slice(0, 5).join(', ')
+        const suffix = failedTicketNumbers.length > 5 ? '...' : ''
+        setActionMessage(
+          `Approved ${approvedCount}/${approvable.length}. Failed tickets: ${preview}${suffix}`,
+        )
+      }
+    } catch (approveAllError) {
+      setActionMessage(getErrorMessage(approveAllError))
+    } finally {
+      setBulkApproveInProgress(false)
+    }
+  }
+
   const buildSettingsPayload = useCallback(
     (intervalOverride?: number) => {
       const parsedInterval = Number(
@@ -1550,28 +1838,305 @@ const AdminDashboard = () => {
     }
   }
 
-  const handleSendAnnouncement = async () => {
+  const handleSaveLobbyAnnouncement = async (nextIsActive: boolean) => {
     if (!gameId) {
+      setActionMessage('Select a game before saving lobby announcement.')
+      return
+    }
+
+    const title = lobbyAnnouncementTitle.trim()
+    const content = lobbyAnnouncementContent.trim()
+
+    if (nextIsActive && (!title || !content)) {
+      setActionMessage('Lobby announcement title and content are required.')
+      return
+    }
+    if (!nextIsActive && lobbyAnnouncementVersion === null) {
+      setActionMessage('No active lobby announcement to disable.')
+      return
+    }
+
+    setSavingLobbyAnnouncement(true)
+    setActionMessage('')
+    try {
+      const payload = await saveAdminLobbyAnnouncement(gameId, {
+        title: title || 'Announcement',
+        content: content || 'Announcement',
+        is_active: nextIsActive,
+      })
+      applyLobbyAnnouncementState(payload)
+      setActionMessage(
+        nextIsActive
+          ? `Lobby announcement saved. Version ${payload.version}.`
+          : 'Lobby announcement disabled for this lobby.',
+      )
+    } catch (saveError) {
+      setActionMessage(getErrorMessage(saveError))
+    } finally {
+      setSavingLobbyAnnouncement(false)
+    }
+  }
+
+  const handleSendAnnouncement = async (mode: 'text' | 'voice' = 'text') => {
+    const targetGameId = String(
+      gameId || summary?.game.id || games.find((item) => item.is_current)?.id || '',
+    ).trim()
+
+    if (!targetGameId) {
       setActionMessage('Select a game before sending an announcement.')
       return
     }
 
     const message = announcementText.trim()
-    if (!message) {
-      setActionMessage('Announcement message cannot be empty.')
+    const hasRecordedVoice =
+      Boolean(recordedVoiceAnnouncementBlob) &&
+      Number(recordedVoiceAnnouncementBlob?.size ?? 0) > 0
+
+    if (mode === 'text' && !message) {
+      setActionMessage('Announcement message cannot be empty for text send.')
       return
     }
 
+    if (mode === 'voice' && !message && !hasRecordedVoice) {
+      setActionMessage('Enter announcement text or record your real voice before sending.')
+      return
+    }
+
+    if (recordingVoiceAnnouncement) {
+      setActionMessage('Stop voice recording before sending the announcement.')
+      return
+    }
+
+    if (micListening && announcementRecognitionRef.current) {
+      try {
+        announcementRecognitionRef.current.stop()
+      } catch {
+        // ignore
+      }
+      setMicListening(false)
+    }
+
     setSendingAnnouncement(true)
+    setAnnouncementSendMode(mode)
     setActionMessage('')
     try {
-      await announceGame(gameId, message)
+      const useRecordedVoice = mode === 'voice' && hasRecordedVoice
+      const outgoingMessage =
+        mode === 'voice' && !useRecordedVoice
+          ? encodeVoiceAnnouncement(message)
+          : message
+      const audioFileName = useRecordedVoice
+        ? `announcement-${Date.now()}.${getVoiceRecordingExtension(recordedVoiceAnnouncementMimeType)}`
+        : undefined
+
+      await announceGame(
+        targetGameId,
+        outgoingMessage,
+        useRecordedVoice
+          ? {
+              audioClip: recordedVoiceAnnouncementBlob as Blob,
+              audioFileName,
+            }
+          : undefined,
+      )
       setAnnouncementText('')
-      setActionMessage('Announcement sent to connected players.')
+      if (useRecordedVoice) {
+        clearRecordedVoiceAnnouncement()
+      }
+      setActionMessage(
+        useRecordedVoice
+          ? 'Real voice announcement sent to connected players.'
+          : mode === 'voice'
+            ? 'Voice announcement sent to connected players.'
+            : 'Announcement sent to connected players.',
+      )
     } catch (sendError) {
       setActionMessage(getErrorMessage(sendError))
     } finally {
       setSendingAnnouncement(false)
+      setAnnouncementSendMode(null)
+    }
+  }
+
+  const handleToggleVoiceRecording = async () => {
+    if (!voiceRecordingSupported) {
+      setActionMessage('Voice recording is not supported in this browser.')
+      return
+    }
+
+    if (recordingVoiceAnnouncement) {
+      const recorder = announcementVoiceRecorderRef.current
+      if (recorder && recorder.state !== 'inactive') {
+        try {
+          recorder.stop()
+        } catch {
+          releaseVoiceRecorderResources()
+          setRecordingVoiceAnnouncement(false)
+        }
+      } else {
+        releaseVoiceRecorderResources()
+        setRecordingVoiceAnnouncement(false)
+      }
+      return
+    }
+
+    if (micListening && announcementRecognitionRef.current) {
+      try {
+        announcementRecognitionRef.current.stop()
+      } catch {
+        // ignore
+      }
+      setMicListening(false)
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = resolveVoiceRecorderMimeType()
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream)
+
+      clearRecordedVoiceAnnouncement()
+      announcementVoiceChunksRef.current = []
+      announcementVoiceStreamRef.current = stream
+      announcementVoiceRecorderRef.current = recorder
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          announcementVoiceChunksRef.current.push(event.data)
+        }
+      }
+
+      recorder.onerror = () => {
+        releaseVoiceRecorderResources()
+        setRecordingVoiceAnnouncement(false)
+        setActionMessage('Unable to capture voice recording.')
+      }
+
+      recorder.onstop = () => {
+        const chunks = [...announcementVoiceChunksRef.current]
+        releaseVoiceRecorderResources()
+        setRecordingVoiceAnnouncement(false)
+
+        if (chunks.length === 0) {
+          setActionMessage('No voice recorded. Please try again.')
+          return
+        }
+
+        const fallbackType = mimeType || recorder.mimeType || 'audio/webm'
+        const recordedBlob = new Blob(chunks, {
+          type: chunks[0]?.type || fallbackType,
+        })
+        if (!recordedBlob.size) {
+          setActionMessage('No voice recorded. Please try again.')
+          return
+        }
+
+        const objectUrl = URL.createObjectURL(recordedBlob)
+        recordedVoiceAnnouncementUrlRef.current = objectUrl
+        setRecordedVoiceAnnouncementBlob(recordedBlob)
+        setRecordedVoiceAnnouncementMimeType(recordedBlob.type || fallbackType)
+        setRecordedVoiceAnnouncementUrl(objectUrl)
+        setActionMessage('Voice recording captured. You can now send your real voice.')
+      }
+
+      recorder.start(250)
+      setRecordingVoiceAnnouncement(true)
+      setActionMessage('Recording real voice announcement...')
+    } catch {
+      releaseVoiceRecorderResources()
+      setRecordingVoiceAnnouncement(false)
+      setActionMessage('Unable to access microphone for recording. Check permissions and try again.')
+    }
+  }
+
+  const handleClearRecordedVoice = () => {
+    if (recordingVoiceAnnouncement) {
+      const recorder = announcementVoiceRecorderRef.current
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.ondataavailable = null
+        recorder.onerror = null
+        recorder.onstop = null
+        try {
+          recorder.stop()
+        } catch {
+          // ignore
+        }
+      }
+      releaseVoiceRecorderResources()
+      setRecordingVoiceAnnouncement(false)
+    }
+    clearRecordedVoiceAnnouncement()
+  }
+
+  const handleToggleAnnouncementMic = () => {
+    if (!micSupported) {
+      setActionMessage('Microphone input is not supported in this browser.')
+      return
+    }
+
+    if (recordingVoiceAnnouncement) {
+      setActionMessage('Stop voice recording before using speech-to-text.')
+      return
+    }
+
+    if (micListening) {
+      try {
+        announcementRecognitionRef.current?.stop()
+      } catch {
+        // ignore
+      }
+      setMicListening(false)
+      return
+    }
+
+    const RecognitionCtor = getSpeechRecognitionCtor()
+    if (!RecognitionCtor) {
+      setMicSupported(false)
+      setActionMessage('Microphone input is not supported in this browser.')
+      return
+    }
+
+    const recognition = announcementRecognitionRef.current ?? new RecognitionCtor()
+    recognition.continuous = true
+    recognition.interimResults = false
+    recognition.lang = 'en-IN'
+    recognition.onresult = (event) => {
+      const results = event.results
+      let transcript = ''
+      for (let index = 0; index < results.length; index += 1) {
+        const result = results[index]
+        if (!result?.isFinal) continue
+        const chunk = String(result[0]?.transcript ?? '').trim()
+        if (!chunk) continue
+        transcript = `${transcript}${transcript ? ' ' : ''}${chunk}`
+      }
+      if (!transcript) return
+      setAnnouncementText((previous) => {
+        const merged = `${previous.trim()} ${transcript}`.trim()
+        return merged.slice(0, 1000)
+      })
+    }
+    recognition.onerror = (event) => {
+      const errorCode = String(event.error ?? '').trim()
+      if (errorCode && errorCode !== 'no-speech') {
+        setActionMessage(`Microphone error: ${errorCode}.`)
+      }
+      setMicListening(false)
+    }
+    recognition.onend = () => {
+      setMicListening(false)
+    }
+
+    announcementRecognitionRef.current = recognition
+
+    try {
+      recognition.start()
+      setMicListening(true)
+      setActionMessage('')
+    } catch {
+      setMicListening(false)
+      setActionMessage('Unable to start microphone input. Check mic permission and try again.')
     }
   }
 
@@ -2094,7 +2659,8 @@ const AdminDashboard = () => {
       <section className="admin-card">
         <h2>Player Announcement</h2>
         <p className="announcement-help">
-          Send a live written message to all connected players.  For different style give prefix like [warning], [success],[danger] and default is [info].
+          Send a live message to all connected players. Use prefixes like [warning], [success], [danger]
+          for style. Use voice send when you want players to hear your message.
         </p>
         <div className="announcement-form">
           <textarea
@@ -2104,14 +2670,150 @@ const AdminDashboard = () => {
             rows={3}
             maxLength={1000}
           />
-          <button
-            type="button"
-            className="primary-btn"
-            onClick={handleSendAnnouncement}
-            disabled={!gameId || sendingAnnouncement || !announcementText.trim()}
-          >
-            {sendingAnnouncement ? 'Sending...' : 'Send Announcement'}
-          </button>
+          <div className="announcement-recording-row">
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => void handleToggleVoiceRecording()}
+              disabled={sendingAnnouncement || !voiceRecordingSupported}
+            >
+              {!voiceRecordingSupported
+                ? 'Voice Recorder Unsupported'
+                : recordingVoiceAnnouncement
+                  ? 'Stop Recording'
+                  : 'Record Real Voice'}
+            </button>
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={handleClearRecordedVoice}
+              disabled={sendingAnnouncement || (!recordedVoiceAnnouncementBlob && !recordingVoiceAnnouncement)}
+            >
+              Clear Recording
+            </button>
+            <span className="announcement-recording-status">
+              {recordingVoiceAnnouncement
+                ? 'Recording...'
+                : recordedVoiceAnnouncementBlob
+                  ? 'Voice clip ready'
+                  : 'No voice clip'}
+            </span>
+          </div>
+          {recordedVoiceAnnouncementUrl && (
+            <div className="announcement-recording-preview">
+              <audio
+                controls
+                src={recordedVoiceAnnouncementUrl}
+                preload="metadata"
+              />
+            </div>
+          )}
+          <div className="announcement-actions">
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={handleToggleAnnouncementMic}
+              disabled={sendingAnnouncement || !micSupported}
+            >
+              {!micSupported ? 'Mic Not Supported' : micListening ? 'Stop Mic' : 'Use Mic'}
+            </button>
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={() => void handleSendAnnouncement('text')}
+              disabled={sendingAnnouncement || !announcementText.trim()}
+            >
+              {sendingAnnouncement && announcementSendMode === 'text' ? 'Sending...' : 'Send Text Announcement'}
+            </button>
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => void handleSendAnnouncement('voice')}
+              disabled={
+                sendingAnnouncement ||
+                recordingVoiceAnnouncement ||
+                (!announcementText.trim() && !recordedVoiceAnnouncementBlob)
+              }
+            >
+              {sendingAnnouncement && announcementSendMode === 'voice'
+                ? 'Sending...'
+                : recordedVoiceAnnouncementBlob
+                  ? 'Send Real Voice Announcement'
+                  : 'Send Voice Announcement'}
+            </button>
+          </div>
+          {micListening && <p className="announcement-mic-hint">Listening... speak now.</p>}
+          {recordingVoiceAnnouncement && (
+            <p className="announcement-mic-hint">Recording... speak your announcement now.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="admin-card">
+        <h2>Lobby Entry Announcement</h2>
+        <p className="announcement-help">
+          Shown as a mandatory accept modal for this selected lobby. Users see it once per version, then
+          must re-accept only when you update content.
+        </p>
+        <div className="lobby-announcement-editor">
+          <div className="lobby-announcement-meta">
+            <span>
+              Status:{' '}
+              {loadingLobbyAnnouncement
+                ? 'Loading...'
+                : lobbyAnnouncementVersion === null
+                  ? 'Not configured'
+                  : lobbyAnnouncementActive
+                    ? 'Active'
+                    : 'Disabled'}
+            </span>
+            <span>Version: {lobbyAnnouncementVersion ?? '-'}</span>
+          </div>
+          <label className="lobby-announcement-field">
+            Title
+            <input
+              type="text"
+              value={lobbyAnnouncementTitle}
+              onChange={(event) => setLobbyAnnouncementTitle(event.target.value)}
+              maxLength={255}
+              placeholder="Example: Important Lobby Notice"
+              disabled={loadingLobbyAnnouncement || savingLobbyAnnouncement || !gameId}
+            />
+          </label>
+          <label className="lobby-announcement-field">
+            Content
+            <textarea
+              value={lobbyAnnouncementContent}
+              onChange={(event) => setLobbyAnnouncementContent(event.target.value)}
+              rows={6}
+              maxLength={10000}
+              placeholder="Write the mandatory notice users must accept before entering this lobby."
+              disabled={loadingLobbyAnnouncement || savingLobbyAnnouncement || !gameId}
+            />
+          </label>
+          <div className="announcement-actions">
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={() => void handleSaveLobbyAnnouncement(true)}
+              disabled={loadingLobbyAnnouncement || savingLobbyAnnouncement || !gameId}
+            >
+              {savingLobbyAnnouncement ? 'Saving...' : 'Save Lobby Announcement'}
+            </button>
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => void handleSaveLobbyAnnouncement(false)}
+              disabled={
+                loadingLobbyAnnouncement ||
+                savingLobbyAnnouncement ||
+                !gameId ||
+                lobbyAnnouncementVersion === null
+              }
+            >
+              {savingLobbyAnnouncement ? 'Saving...' : 'Disable Lobby Announcement'}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -2634,8 +3336,20 @@ const AdminDashboard = () => {
 
           <div className="pending-requests-panel">
             <div className="pending-requests-head">
-              <strong>Pending ticket requests</strong>
-              <span>{pendingTickets.length}</span>
+              <div className="pending-requests-head-main">
+                <strong>Pending ticket requests</strong>
+                <span>{pendingTickets.length}</span>
+              </div>
+              <button
+                type="button"
+                className="approve-btn pending-approve-all-btn"
+                onClick={() => void handleApproveAllPendingRequests()}
+                disabled={
+                  pendingTickets.length === 0 || bookingActionsDisabled || bulkApproveInProgress
+                }
+              >
+                {bulkApproveInProgress ? 'Approving all...' : 'Approve all'}
+              </button>
             </div>
             {pendingTickets.length === 0 ? (
               <div className="pending-requests-empty">No pending booking requests.</div>
@@ -2667,7 +3381,13 @@ const AdminDashboard = () => {
                                 type="button"
                                 className="approve-btn"
                                 onClick={() => void handleApprovePendingRequest(ticket)}
-                                disabled={!ticket.id || approving || rejecting || bookingActionsDisabled}
+                                disabled={
+                                  !ticket.id ||
+                                  approving ||
+                                  rejecting ||
+                                  bookingActionsDisabled ||
+                                  bulkApproveInProgress
+                                }
                               >
                                 {approving ? 'Approving...' : 'Approve'}
                               </button>
@@ -2675,7 +3395,13 @@ const AdminDashboard = () => {
                                 type="button"
                                 className="reject-btn"
                                 onClick={() => void handleRejectPendingRequest(ticket)}
-                                disabled={!ticket.id || approving || rejecting || bookingActionsDisabled}
+                                disabled={
+                                  !ticket.id ||
+                                  approving ||
+                                  rejecting ||
+                                  bookingActionsDisabled ||
+                                  bulkApproveInProgress
+                                }
                               >
                                 {rejecting ? 'Rejecting...' : 'Reject'}
                               </button>
@@ -2691,14 +3417,14 @@ const AdminDashboard = () => {
           </div>
 
           {showTicketCards ? (
-            <div>
+            <TambolaTicketGrid className="admin-ticket-grid">
               {filteredTickets.map((ticket) => (
                 <TambolaTicketCard
                   key={ticket.ticket_number}
                   ticket={ticket}
                 />
               ))}
-            </div>
+            </TambolaTicketGrid>
           ) : (
             <div className="table-wrap">
               <table>

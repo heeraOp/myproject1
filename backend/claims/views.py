@@ -8,6 +8,8 @@ from channels.layers import get_channel_layer
 from django.utils import timezone
 
 from games.models import Game
+from games.services.voice_events import broadcast_winner_prize_voice_event
+from games.services.winner_pause import set_winner_announcement_hold
 from tickets.models import Ticket
 
 from .utils.evaluator import evaluate_claims_for_game
@@ -447,6 +449,7 @@ class ClaimSubmitView(APIView):
         Claim.objects.create(game=game, prize=prize, ticket=ticket)
 
         winner_payload = WinnerSerializer(winner).data
+        set_winner_announcement_hold(game_id=game.id)
 
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
@@ -467,6 +470,11 @@ class ClaimSubmitView(APIView):
                 "winner_name": winner.username or winner.ticket.player_name or "",
                 "timestamp": timezone.now().isoformat(),
             },
+        )
+        broadcast_winner_prize_voice_event(
+            game_id=game.id,
+            prize_name=getattr(winner.prize, "name", ""),
+            prize_type=winner.prize.prize_type,
         )
         print("Winner broadcast sent")
 

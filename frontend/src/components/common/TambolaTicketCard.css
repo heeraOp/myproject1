@@ -1,119 +1,133 @@
-.ticket-card {
-  margin-top: 16px;
+.tambola-ticket-card {
+  display: grid;
+  gap: 6px;
+  margin: 0;
 }
 
-.ticket-card__header {
+.tambola-ticket-card__header {
   background: #3d66e7;
-  color: var(--color-fff);
-  border-radius: 16px;
-  padding: 8px 14px;
+  color: #fff;
+  border-radius: 8px;
+  min-height: 30px;
+  padding: 4px 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-weight: 700;
+  gap: 8px;
   text-transform: uppercase;
 }
 
-.ticket-owner {
-  font-size: clamp(20px, 1.6vw, 34px);
+.tambola-ticket-card__owner {
+  font-size: clamp(12px, 0.95vw, 18px);
   font-weight: 800;
   letter-spacing: 0.2px;
+  line-height: 1.2;
 }
 
-.ticket-status {
-  font-size: clamp(20px, 1.5vw, 32px);
+.tambola-ticket-card__status {
+  font-size: clamp(12px, 0.9vw, 17px);
   font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
 }
 
-.ticket-status.booked {
-  color: var(--color-fff);
+.tambola-ticket-card__status.booked,
+.tambola-ticket-card__status.open,
+.tambola-ticket-card__status.pending {
+  color: #fff;
 }
 
-.ticket-status.open {
-  color: var(--color-fff);
-}
-
-.ticket-status.pending {
-  color: var(--color-fff);
-}
-
-.ticket-request-btn {
+.tambola-ticket-card__request-btn {
   border: none;
-  border-radius: 0;
   background: transparent;
-  color: var(--color-fff);
+  color: #fff;
   font-weight: 800;
-  font-size: clamp(20px, 1.5vw, 32px);
+  font-size: clamp(12px, 0.9vw, 17px);
+  line-height: 1;
   padding: 0;
   cursor: pointer;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.ticket-request-btn:disabled {
-  opacity: 0.58;
+.tambola-ticket-card__request-btn:disabled {
+  opacity: 0.62;
   cursor: not-allowed;
 }
 
-.ticket-pending-meta {
+.tambola-ticket-card__pending-meta {
   background: #214bb4;
-  border-left: 3px solid #3d66e7;
-  border-right: 3px solid #3d66e7;
+  border: 1px solid #2e57ca;
+  border-radius: 6px;
   color: #f5f7ff;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  padding: 7px 10px;
+  padding: 5px 8px;
 }
 
-.ticket-grid-wrapper {
-  display: block;
-  background: #ff1313;
-  border-radius: 16px;
-  padding: 8px;
-  margin-top: 8px;
+.tambola-ticket-card__body {
+  background: #ff1d1d;
+  border: 3px solid #ff1d1d;
+  border-radius: 12px;
+  padding: 4px;
 }
 
-.ticket-grid {
-  background: #fff;
-  border: 1px solid #d4d4d4;
-  border-radius: 4px;
+.tambola-ticket-card__grid {
+  background: #e7e7e7;
+  border: 1px solid #b9b9b9;
+  border-radius: 6px;
   overflow: hidden;
   display: grid;
-  grid-template-columns: repeat(9, 1fr);
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 1px;
 }
 
-.ticket-cell {
-  min-height: 64px;
-  border: 1px solid #c8c8c8;
-  background: #ececec;
-  color: #111;
+.tambola-ticket-card__cell {
+  min-height: 38px;
+  aspect-ratio: 1 / 1;
+  border: 1px solid #adadad;
+  background: #cfcfcf;
+  color: #181a1f;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: clamp(28px, 2.2vw, 40px);
+  font-size: clamp(12px, 1.8vw, 22px);
   font-weight: 800;
+  line-height: 1;
 }
 
-.ticket-cell.called {
-  background: #f8e8a4;
-  border-color: #d9c16a;
+.tambola-ticket-card__cell.is-empty {
+  color: transparent;
+}
+
+.tambola-ticket-card__cell.is-called {
+  background: #f3df9f;
+  border-color: #d6b85c;
   color: #111;
 }
 
-.ticket-side-strip {
-  display: none;
+@media (max-width: 1024px) {
+  .tambola-ticket-card__owner,
+  .tambola-ticket-card__status,
+  .tambola-ticket-card__request-btn {
+    font-size: 13px;
+  }
 }
 
-@media (max-width: 900px) {
-  .ticket-owner {
-    font-size: 16px;
+@media (max-width: 680px) {
+  .tambola-ticket-card__header {
+    min-height: 32px;
+    padding: 5px 8px;
   }
 
-  .ticket-status {
-    font-size: 16px;
+  .tambola-ticket-card__owner,
+  .tambola-ticket-card__status,
+  .tambola-ticket-card__request-btn {
+    font-size: 12px;
   }
 
-  .ticket-cell {
-    min-height: 42px;
-    font-size: 20px;
+  .tambola-ticket-card__cell {
+    min-height: 30px;
+    font-size: 16px;
   }
 }

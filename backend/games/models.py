@@ -1,8 +1,9 @@
 import uuid
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db import models
+from django.db import models, transaction
 
 
 whatsapp_number_validator = RegexValidator(
@@ -136,6 +137,8 @@ class CalledNumber(models.Model):
 class Announcement(models.Model):
     game = models.ForeignKey(Game, on_delete=models.CASCADE, related_name="announcements")
     message = models.TextField()
+    audio_file = models.CharField(max_length=500, blank=True, default="")
+    audio_mime_type = models.CharField(max_length=120, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -148,3 +151,114 @@ class Announcement(models.Model):
 
     def __str__(self) -> str:
         return f"{self.game_id} announcement @ {self.created_at.isoformat()}"
+
+
+class LobbyAnnouncement(models.Model):
+    lobby = models.ForeignKey(Game, on_delete=models.CASCADE, related_name="lobby_announcements")
+    title = models.CharField(max_length=255)
+    content = models.TextField()
+    version = models.PositiveIntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at", "-id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["lobby"],
+                condition=models.Q(is_active=True),
+                name="games_single_active_lobby_announcement_per_lobby",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["lobby", "is_active"], name="games_lob_ann_scope_idx"),
+        ]
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        reset_acceptance = False
+
+        if self.pk:
+            previous = (
+                LobbyAnnouncement.objects
+                .filter(pk=self.pk)
+                .only("title", "content", "version")
+                .first()
+            )
+            if previous is not None:
+                content_changed = previous.title != self.title or previous.content != self.content
+                if content_changed:
+                    self.version = max(int(previous.version or 0) + 1, 1)
+                    reset_acceptance = True
+                elif not self.version:
+                    self.version = max(int(previous.version or 0), 1)
+        elif not self.version:
+            self.version = 1
+
+        if update_fields is not None:
+            next_fields = set(update_fields)
+            if "title" in next_fields or "content" in next_fields:
+                next_fields.add("version")
+            kwargs["update_fields"] = tuple(next_fields)
+
+        with transaction.atomic():
+            if self.is_active and self.lobby_id:
+                (
+                    LobbyAnnouncement.objects
+                    .select_for_update()
+                    .filter(lobby_id=self.lobby_id, is_active=True)
+                    .exclude(pk=self.pk)
+                    .update(is_active=False)
+                )
+
+            super().save(*args, **kwargs)
+
+            if reset_acceptance:
+                self.acceptances.all().delete()
+
+    def __str__(self) -> str:
+        return f"{self.lobby_id} announcement v{self.version}"
+
+
+class LobbyAnnouncementAcceptance(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="lobby_announcement_acceptances",
+    )
+    lobby = models.ForeignKey(
+        Game,
+        on_delete=models.CASCADE,
+        related_name="lobby_announcement_acceptances",
+    )
+    announcement = models.ForeignKey(
+        LobbyAnnouncement,
+        on_delete=models.CASCADE,
+        related_name="acceptances",
+    )
+    accepted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-accepted_at", "-id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "lobby", "announcement"],
+                name="games_lobby_announcement_acceptance_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "lobby"], name="games_lob_acc_usr_lob_idx"),
+            models.Index(fields=["lobby", "announcement"], name="games_lob_acc_lob_ann_idx"),
+        ]
+
+    def clean(self):
+        if (
+            self.announcement_id is not None
+            and self.lobby_id is not None
+            and self.announcement.lobby_id != self.lobby_id
+        ):
+            raise ValidationError("announcement does not belong to the given lobby.")
+
+    def __str__(self) -> str:
+        return f"{self.user_id} accepted {self.announcement_id} for lobby {self.lobby_id}"

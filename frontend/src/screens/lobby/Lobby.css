@@ -238,6 +238,10 @@
   font-weight: 800;
 }
 
+.lobby-ticket-grid {
+  width: 100%;
+}
+
 .state-box {
   margin-top: 14px;
   padding: 14px;

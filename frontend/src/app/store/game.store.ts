@@ -103,8 +103,57 @@ const initialState = {
   canSubmitClaims: true as boolean,
 }
 
+const isValidCalledNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 90
+
 const isValidCalledNumbers = (numbers: unknown): numbers is number[] =>
-  Array.isArray(numbers) && numbers.every((value) => Number.isInteger(value) && value >= 1 && value <= 90)
+  Array.isArray(numbers) && numbers.every((value) => isValidCalledNumber(value))
+
+const toUniqueCalledNumbers = (numbers: number[]): number[] => {
+  const seen = new Set<number>()
+  const sequence: number[] = []
+  numbers.forEach((value) => {
+    if (!isValidCalledNumber(value) || seen.has(value)) return
+    seen.add(value)
+    sequence.push(value)
+  })
+  return sequence
+}
+
+const toCalledNumberSequence = (
+  previousSequence: number[],
+  incomingNumbers: number[],
+  latestNumber?: number | null,
+): number[] => {
+  const normalizedIncoming = toUniqueCalledNumbers(incomingNumbers)
+  if (normalizedIncoming.length === 0) return []
+
+  const incomingSet = new Set(normalizedIncoming)
+  const nextSequence: number[] = []
+  const seen = new Set<number>()
+
+  // Keep existing order for already-known numbers.
+  previousSequence.forEach((value) => {
+    if (!incomingSet.has(value) || seen.has(value)) return
+    seen.add(value)
+    nextSequence.push(value)
+  })
+
+  const hasLatest = isValidCalledNumber(latestNumber) && incomingSet.has(latestNumber)
+  normalizedIncoming.forEach((value) => {
+    if (seen.has(value)) return
+    if (hasLatest && value === latestNumber) return
+    seen.add(value)
+    nextSequence.push(value)
+  })
+
+  if (hasLatest && !seen.has(latestNumber)) {
+    seen.add(latestNumber)
+    nextSequence.push(latestNumber)
+  }
+
+  return nextSequence
+}
 
 const isValidWinner = (winner: unknown): winner is Winner => {
   if (!winner || typeof winner !== 'object') return false
@@ -190,10 +239,17 @@ export const useGameStore = create<GameStateStore>((set) => ({
           return state
         }
 
-        const nextCalledNumbers = event.called_numbers
-        const currentNumberFromList = nextCalledNumbers.length
-          ? nextCalledNumbers[nextCalledNumbers.length - 1]
-          : event.number
+        const nextCalledNumbers = toCalledNumberSequence(
+          state.calledNumbers,
+          event.called_numbers,
+          event.number,
+        )
+        const currentNumberFromList =
+          isValidCalledNumber(event.number) && nextCalledNumbers.includes(event.number)
+            ? event.number
+            : nextCalledNumbers.length
+              ? nextCalledNumbers[nextCalledNumbers.length - 1]
+              : null
         const calledSet = new Set(nextCalledNumbers)
         const nextTickets = state.tickets.map((ticket) =>
           withMarkedNumbers(ticket, calledSet, false),
@@ -255,7 +311,10 @@ export const useGameStore = create<GameStateStore>((set) => ({
       const rawCalledNumbers = isValidCalledNumbers(payload?.called_numbers) ? payload.called_numbers : []
       const wonPrizes = Array.isArray(payload?.won_prizes) ? payload.won_prizes : []
       const mappedStatus = mapBackendStatus(payload?.game?.status ?? '')
-      const calledNumbers = rawCalledNumbers
+      const calledNumbers =
+        state.gameId && payload?.game?.id && state.gameId === payload.game.id
+          ? toCalledNumberSequence(state.calledNumbers, rawCalledNumbers, state.currentNumber)
+          : toUniqueCalledNumbers(rawCalledNumbers)
       const resolvedStatus: GameStatus =
         mappedStatus === 'FINISHED' || calledNumbers.length >= 90 ? 'FINISHED' : mappedStatus
       const calledSet = new Set(calledNumbers)

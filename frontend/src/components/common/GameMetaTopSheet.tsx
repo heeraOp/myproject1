@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
 import { fetchGameMeta, type GameMetaResponse } from '@/api/rest/games'
+import { formatDateInIST, formatTimeInIST } from '@/utils/dateTime'
 import './GameMetaTopSheet.css'
 
 type GameMetaTopSheetProps = {
@@ -7,17 +8,21 @@ type GameMetaTopSheetProps = {
   gameNameOverride?: string | null
   ticketPriceOverride?: number | null
   gameStatusOverride?: string | null
+  gameDateOverride?: string | null
+  bookingStatusOverride?: string | null
+  websiteStatusOverride?: string | null
 }
 
 const SWIPE_THRESHOLD_PX = 46
 
 const DEFAULT_HOW_TO_PLAY = [
-  'Numbers are called live.',
-  'Mark numbers on your ticket.',
-  'Claim prize patterns before others.',
+  'Numbers are called live during the game.',
+  'Numbers on your ticket are marked automatically when called.',
+  'Prize claims are detected automatically by the system.',
+  'Rewards are calculated automatically based on completed patterns.',
+  'Final prize distribution is done manually by the admin.',
   'Sheet bonuses apply based on ticket count.',
-  'Claims are verified by admin.',
-]
+];
 
 const normalizeWhatsAppDigits = (value: string): string => value.replace(/\D/g, '')
 
@@ -38,6 +43,21 @@ const toHowToPlayItems = (raw: string | undefined): string[] => {
   return bySentence.length > 0 ? bySentence : DEFAULT_HOW_TO_PLAY
 }
 
+const normalizeStatusToken = (value: string | null | undefined): string =>
+  String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '_')
+
+const toDateTimeLabel = (value: string | null | undefined): string => {
+  const raw = String(value ?? '').trim()
+  if (!raw) return 'Not announced'
+  const datePart = formatDateInIST(raw)
+  const timePart = formatTimeInIST(raw)
+  if (datePart === '--/--/----' || timePart === '--:--:--') return 'Not announced'
+  return `${datePart} ${timePart}`
+}
+
 type PrizePatternDetail = {
   prize_type: string
   label: string
@@ -47,8 +67,10 @@ type PrizePatternDetail = {
 const GameMetaTopSheet = ({
   refreshKey,
   gameNameOverride,
-  ticketPriceOverride,
   gameStatusOverride,
+  gameDateOverride,
+  bookingStatusOverride,
+  websiteStatusOverride,
 }: GameMetaTopSheetProps) => {
   const [expanded, setExpanded] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -94,18 +116,29 @@ const GameMetaTopSheet = ({
     return value || 'Tambola Game'
   }, [gameNameOverride, meta?.game_name])
 
-  const ticketPrice = useMemo(() => {
-    const override = Number(ticketPriceOverride ?? 0)
-    if (Number.isFinite(override) && override > 0) return override
-    const value = Number(meta?.ticket_price ?? 0)
-    return Number.isFinite(value) && value > 0 ? value : 0
-  }, [ticketPriceOverride, meta?.ticket_price])
+  const resolvedGameStatus = useMemo(() => {
+    const normalizedOverride = normalizeStatusToken(gameStatusOverride)
+    if (normalizedOverride) return normalizedOverride
+    return meta?.is_live ? 'RUNNING' : 'CREATED'
+  }, [gameStatusOverride, meta?.is_live])
 
   const isLive = useMemo(() => {
-    const status = String(gameStatusOverride ?? '').trim().toUpperCase()
-    if (status) return status === 'RUNNING'
+    if (resolvedGameStatus === 'RUNNING' || resolvedGameStatus === 'PAUSED') return true
+    if (resolvedGameStatus === 'FINISHED' || resolvedGameStatus === 'ENDED') return false
     return Boolean(meta?.is_live)
-  }, [gameStatusOverride, meta?.is_live])
+  }, [meta?.is_live, resolvedGameStatus])
+
+  const bookingStatusLabel = useMemo(() => {
+    const normalized = normalizeStatusToken(bookingStatusOverride)
+    return normalized ? normalized.replace(/_/g, ' ') : 'UNKNOWN'
+  }, [bookingStatusOverride])
+
+  const websiteStatusLabel = useMemo(() => {
+    const normalized = normalizeStatusToken(websiteStatusOverride)
+    return normalized ? normalized.replace(/_/g, ' ') : 'UNKNOWN'
+  }, [websiteStatusOverride])
+
+  const gameDateLabel = useMemo(() => toDateTimeLabel(gameDateOverride), [gameDateOverride])
 
   const agentName = useMemo(() => {
     const value = String(meta?.agent_name ?? '').trim()
@@ -172,12 +205,8 @@ const GameMetaTopSheet = ({
     const message = encodeURIComponent(
       `Hello ${agentName}, I need help with booking for ${gameName}.`,
     )
-    return `https://wa.me/${agentWhatsappDigits}?text=${message}`
+    return `https://api.whatsapp.com/send?phone=${agentWhatsappDigits}&text=${message}`
   }, [agentName, agentWhatsappDigits, gameName])
-
-  const compactLine = `${gameName} • ${ticketPrice > 0 ? `₹${ticketPrice} per ticket` : 'Ticket info unavailable'} • ${
-    isLive ? 'LIVE' : 'NOT LIVE'
-  }`
 
   const handleCompactTouchStart = (event: TouchEvent<HTMLButtonElement>) => {
     openSwipeStartY.current = event.touches[0]?.clientY ?? null
@@ -236,11 +265,17 @@ const GameMetaTopSheet = ({
             <span className="game-meta-trophy" aria-hidden="true">
               🏆
             </span>
-            <span className="game-meta-compact__text">{compactLine}</span>
+            <span className="game-meta-compact__text-wrap">
+              <span className="game-meta-compact__eyebrow">Live Housie Desk</span>
+              <span className="game-meta-compact__headline">Game Information</span>
+            </span>
           </div>
-          <span className="game-meta-compact__right" aria-hidden="true">
-            <span className={`game-meta-live-dot${isLive ? ' is-live' : ''}`} />
-            <span className={`game-meta-info-icon${expanded ? ' is-open' : ''}`}>i</span>
+          <span className="game-meta-compact__right">
+            <span className={`game-meta-info-pill${expanded ? ' is-open' : ''}`} aria-hidden="true">
+              <span className={`game-meta-live-dot${isLive ? ' is-live' : ''}`} />
+              <span className="game-meta-info-pill__label">GAME INFO</span>
+              <span className={`game-meta-info-icon${expanded ? ' is-open' : ''}`}>+</span>
+            </span>
           </span>
         </button>
 
@@ -260,6 +295,24 @@ const GameMetaTopSheet = ({
           {error && <div className="game-meta-error">{error}</div>}
 
           <section className="game-meta-section">
+            <h3>Game Snapshot</h3>
+            <div className="game-meta-kv-grid">
+              <div className="game-meta-kv-card">
+                <span>Booking</span>
+                <strong>{bookingStatusLabel}</strong>
+              </div>
+              <div className="game-meta-kv-card">
+                <span>Website</span>
+                <strong>{websiteStatusLabel}</strong>
+              </div>
+              <div className="game-meta-kv-card">
+                <span>Game Time</span>
+                <strong>{gameDateLabel}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="game-meta-section">
             <h3>Payment Method</h3>
             <p>Payment is done manually via WhatsApp.</p>
             <p>After booking, you will be redirected to WhatsApp.</p>
@@ -270,7 +323,11 @@ const GameMetaTopSheet = ({
               <div>
                 <strong>{agentName}</strong>
                 <a
-                  href={agentWhatsappDigits ? `https://wa.me/${agentWhatsappDigits}` : undefined}
+                  href={
+                    agentWhatsappDigits
+                      ? `https://api.whatsapp.com/send?phone=${agentWhatsappDigits}`
+                      : undefined
+                  }
                   target="_blank"
                   rel="noopener noreferrer"
                   className={agentWhatsappDigits ? 'is-link' : 'is-disabled'}

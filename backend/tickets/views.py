@@ -1,5 +1,7 @@
+import re
 from urllib.parse import quote
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.authentication import SessionAuthentication
@@ -288,7 +290,35 @@ def _build_booking_response_payload(
 
 
 def _normalize_whatsapp_digits(value):
-    return "".join(ch for ch in str(value or "") if ch.isdigit())
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    if digits.startswith("00"):
+        return digits[2:]
+    return digits
+
+
+def _coerce_whatsapp_e164_digits(value):
+    digits = _normalize_whatsapp_digits(value)
+    if not digits:
+        return ""
+
+    # Optional default from environment.
+    default_country_code = _normalize_whatsapp_digits(
+        getattr(settings, "WHATSAPP_DEFAULT_COUNTRY_CODE", "")
+    )
+
+    # Normalize local formats to E.164 digits:
+    # - 0XXXXXXXXXX -> prepend country code
+    # - XXXXXXXXXX  -> prepend country code (fallback to 91 for India deployments)
+    if digits.startswith("0") and len(digits) == 11:
+        digits = digits[1:]
+    if len(digits) == 10:
+        inferred_country_code = default_country_code or "91"
+        digits = f"{inferred_country_code}{digits}"
+
+    # E.164 max 15 digits, and must include country code (>10 digits).
+    if not re.fullmatch(r"[1-9]\d{10,14}", digits):
+        return ""
+    return digits
 
 
 def _build_whatsapp_redirect_url(*, game, player_name, booking_type, ticket_numbers, ticket_count):
@@ -301,9 +331,9 @@ def _build_whatsapp_redirect_url(*, game, player_name, booking_type, ticket_numb
     if not game_name:
         game_name = "Tambola Game"
 
-    whatsapp_digits = _normalize_whatsapp_digits(getattr(settings, "agent_whatsapp_number", ""))
+    whatsapp_digits = _coerce_whatsapp_e164_digits(getattr(settings, "agent_whatsapp_number", ""))
     if not whatsapp_digits and getattr(game, "agent", None) is not None:
-        whatsapp_digits = _normalize_whatsapp_digits(getattr(game.agent, "whatsapp_number", ""))
+        whatsapp_digits = _coerce_whatsapp_e164_digits(getattr(game.agent, "whatsapp_number", ""))
     if not whatsapp_digits:
         return ""
 
@@ -317,7 +347,7 @@ def _build_whatsapp_redirect_url(*, game, player_name, booking_type, ticket_numb
         f"Ticket Numbers: {ticket_numbers_text}\n"
         "Please confirm my payment."
     )
-    return f"https://wa.me/{whatsapp_digits}?text={quote(message, safe='')}"
+    return f"https://api.whatsapp.com/send?phone={whatsapp_digits}&text={quote(message, safe='')}"
 
 
 def _create_booking_record(*, game, player_name, booking_mode, ticket_numbers, payment_mode):

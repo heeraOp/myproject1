@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
+import TambolaTicketGrid from '@/components/common/TambolaTicketGrid'
 import AnnouncementBanner from '@/components/common/AnnouncementBanner'
 import Leaderboard, { type LeaderboardEntry } from '@/components/common/Leaderboard'
 import WinnerPopup from '@/components/common/WinnerPopup'
@@ -19,6 +20,7 @@ import { socketManager } from '@/api/websocket/socketManager'
 import { useGameSocket } from '@/app/hooks/useGameSocket'
 import { useBingoCaller } from '@/app/hooks/useBingoCaller'
 import { useGameStore } from '@/app/store/game.store'
+import { type VoiceMode, useVoiceModeStore } from '@/app/store/voiceMode.store'
 import type { PublicGame } from '@/types/backend/game'
 import type { PlayerTicket } from '@/types/backend/ticket'
 import {
@@ -31,6 +33,7 @@ import {
 } from '@/utils/theme'
 import { formatDateTimeInIST } from '@/utils/dateTime'
 import { playWinnerSoundFlow } from '@/utils/speakText'
+import type { VoiceType } from '@/utils/soundManager'
 import './LiveGame.css'
 
 const PRIZE_LABEL_MAP: Record<string, string> = {
@@ -66,6 +69,18 @@ const normalizePrizeType = (value: string | null | undefined): string => {
   if (normalized === 'HALF_SHEET_BONUS') return 'HALF_SHEET'
   if (normalized === 'FULL_SHEET_BONUS') return 'FULL_SHEET'
   return normalized
+}
+
+const resolveVoiceTypeForMode = (mode: VoiceMode): VoiceType => {
+  if (mode === 'FEMALE_SHOUT') return 'female_shout'
+  if (mode === 'FUNNY' || mode === 'FUNNY_CARTOON' || mode === 'FUNNY_COMEDIC' || mode === 'FUNNY_CRAZY') {
+    return 'funny'
+  }
+  if (mode === 'SPORTS_COMMENTATOR') return 'savage'
+  if (mode === 'ROYAL_COMMANDER') return 'dramatic'
+  if (mode === 'CRAZY') return 'savage'
+  if (mode === 'MALE_DEEP' || mode === 'MALE_ENERGETIC') return 'dramatic'
+  return 'normal'
 }
 
 const dedupeWinners = (winners: Array<PublicWinner>) => {
@@ -132,7 +147,7 @@ const LiveTicketGrid = memo(
     }
 
     return (
-      <div className="live-ticket-list">
+      <TambolaTicketGrid className="live-ticket-list">
         {tickets.map((ticket) => (
           <TambolaTicketCard
             key={ticket.ticket_number}
@@ -141,7 +156,7 @@ const LiveTicketGrid = memo(
             bookingClosed={bookingClosed}
           />
         ))}
-      </div>
+      </TambolaTicketGrid>
     )
   },
   (previous, next) =>
@@ -220,6 +235,7 @@ const LiveGame = () => {
     announcement: bingoAnnouncement,
     audioBlockedMessage,
   } = useBingoCaller({ soundEnabled })
+  const voiceMode = useVoiceModeStore((state) => state.mode)
 
   useEffect(() => {
     return subscribeThemeChange(({ theme: updatedTheme, isLocked }) => {
@@ -253,9 +269,11 @@ const LiveGame = () => {
   const handleWinnerAnnouncement = useCallback(async (winnerName: string, prizeType: string) => {
     const normalizedWinnerName = winnerName.trim() || 'Player'
     const normalizedPrizeType = prizeType.trim() || 'Prize'
-    const prizeLabel = PRIZE_LABEL_MAP[normalizedPrizeType] ?? normalizedPrizeType
-    const announcement = `Congratulations ${normalizedWinnerName}! You won ${prizeLabel}.`
-    const soundPromise = playWinnerSoundFlow(announcement, 'dramatic').catch(() => undefined)
+    const prizeLabel = PRIZE_LABEL_MAP[normalizePrizeType(normalizedPrizeType)] ?? normalizedPrizeType
+    const announcement = `Congratulations players. ${prizeLabel} prize has been won.`
+    const soundPromise = playWinnerSoundFlow(announcement, resolveVoiceTypeForMode(voiceMode)).catch(
+      () => undefined,
+    )
 
     if (winnerFreezeTimerRef.current) {
       window.clearTimeout(winnerFreezeTimerRef.current)
@@ -283,7 +301,7 @@ const LiveGame = () => {
     })
 
     await soundPromise
-  }, [])
+  }, [voiceMode])
 
   const hydrateCurrentGame = useCallback(async () => {
     try {
@@ -743,6 +761,29 @@ const LiveGame = () => {
                   </div>
                 )
               })}
+            </div>
+            <div className="live-last-called">
+              <div className="live-last-called__head">
+                <span>Last Called Numbers</span>
+                <strong>{displayCalledNumbers.length}</strong>
+              </div>
+              {displayCalledNumbers.length > 0 ? (
+                <div className="live-last-called__grid">
+                  {displayCalledNumbers.map((number, index) => {
+                    const isLatest = index === displayCalledNumbers.length - 1
+                    return (
+                      <div
+                        key={`${number}-${index}`}
+                        className={`live-last-called__chip ${isLatest ? 'latest' : ''}`}
+                      >
+                        {number}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="live-last-called__empty">No numbers called yet.</p>
+              )}
             </div>
           </section>
 

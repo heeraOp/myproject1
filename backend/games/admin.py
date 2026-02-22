@@ -1,6 +1,14 @@
 from django.contrib import admin
 
-from .models import Agent, CalledNumber, Game, GameSettings
+from .models import (
+    Agent,
+    Announcement,
+    CalledNumber,
+    Game,
+    GameSettings,
+    LobbyAnnouncement,
+    LobbyAnnouncementAcceptance,
+)
 
 
 @admin.register(Agent)
@@ -37,3 +45,35 @@ class CalledNumberAdmin(admin.ModelAdmin):
 class GameSettingsAdmin(admin.ModelAdmin):
     list_display = ("id", "game_name", "agent_whatsapp_number")
     search_fields = ("game_name", "agent_whatsapp_number")
+
+
+@admin.register(Announcement)
+class AnnouncementAdmin(admin.ModelAdmin):
+    list_display = ("id", "game", "created_at", "is_active")
+    list_filter = ("is_active", "created_at")
+    search_fields = ("game__id", "game__name", "message")
+    readonly_fields = ("created_at",)
+
+
+@admin.register(LobbyAnnouncement)
+class LobbyAnnouncementAdmin(admin.ModelAdmin):
+    list_display = ("id", "lobby", "title", "version", "is_active", "updated_at")
+    list_filter = ("is_active", "created_at", "updated_at")
+    search_fields = ("title", "content", "lobby__id", "lobby__name")
+    readonly_fields = ("version", "created_at", "updated_at")
+    autocomplete_fields = ("lobby",)
+
+
+@admin.register(LobbyAnnouncementAcceptance)
+class LobbyAnnouncementAcceptanceAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "lobby", "announcement", "accepted_at")
+    list_filter = ("accepted_at",)
+    search_fields = (
+        "user__username",
+        "user__email",
+        "lobby__id",
+        "lobby__name",
+        "announcement__title",
+    )
+    readonly_fields = ("accepted_at",)
+    autocomplete_fields = ("user", "lobby", "announcement")

@@ -4,6 +4,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from tickets.models import Ticket
+from games.services.voice_events import broadcast_winner_prize_voice_event
+from games.services.winner_pause import set_winner_announcement_hold
 
 from claims.models import Claim, Winner
 from claims.serializers import WinnerSerializer
@@ -253,6 +255,7 @@ def evaluate_claims_for_game(game):
             claimed_prize_keys.add(prize_key)
 
             winner_payload = WinnerSerializer(winner).data
+            set_winner_announcement_hold(game_id=game.id)
 
             try:
                 channel_layer = get_channel_layer()
@@ -284,6 +287,11 @@ def evaluate_claims_for_game(game):
                         "winner_name": winner.username or winner.ticket.player_name or "Player",
                         "prize_type": winner.prize.prize_type,
                     },
+                )
+                broadcast_winner_prize_voice_event(
+                    game_id=game.id,
+                    prize_name=getattr(winner.prize, "name", ""),
+                    prize_type=winner.prize.prize_type,
                 )
                 print("Winner broadcast SUCCESS")
             except Exception as e:

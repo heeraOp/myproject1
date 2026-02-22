@@ -4,10 +4,13 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 
 VOICE_MODE_VALUES = {
     "CLASSIC",
+    "FEMALE_SHOUT",
     "FUNNY",
     "CRAZY",
     "MALE_DEEP",
     "MALE_ENERGETIC",
+    "ROYAL_COMMANDER",
+    "SPORTS_COMMENTATOR",
     "FUNNY_CARTOON",
     "FUNNY_COMEDIC",
     "FUNNY_CRAZY",
@@ -278,6 +281,19 @@ class GameConsumer(AsyncWebsocketConsumer):
                     "timestamp": event.get("timestamp"),
                     "game_id": event.get("game_id"),
                     "announcement_id": event.get("announcement_id"),
+                    "audio_url": event.get("audio_url"),
+                    "audio_mime_type": event.get("audio_mime_type"),
+                }
+            )
+        )
+
+    async def voice_event(self, event):
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "voice_event",
+                    "event": event.get("event"),
+                    "audio_url": event.get("audio_url"),
                 }
             )
         )

@@ -1,8 +1,16 @@
 import logging
+import math
+import mimetypes
+import os
+import tempfile
+import uuid
+from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.authentication import SessionAuthentication
@@ -16,6 +24,14 @@ from rest_framework.views import APIView
 from common.permissions import IsAdminRole, is_admin_user
 from .models import Agent, Announcement, Game, GameSettings
 from .serializers import AnnouncementCreateSerializer, GameMetaSerializer, GameRecreateSerializer
+from .services.voice_events import (
+    GAME_END_VOICE_KEY,
+    GAME_END_VOICE_TEXT,
+    GAME_START_VOICE_KEY,
+    GAME_START_VOICE_TEXT,
+    broadcast_game_voice_event,
+)
+from .services.winner_pause import get_winner_announcement_hold_remaining
 from .utils.calling import call_next_number
 from .utils.leaderboard import build_live_leaderboard
 from .tasks import auto_call_numbers
@@ -61,11 +77,13 @@ PRIZE_RULE_EXPLANATIONS = {
 
 DEFAULT_HOW_TO_PLAY = (
     "Numbers are called live.\n"
-    "Mark numbers on your ticket.\n"
-    "Claim prize patterns before others.\n"
+    "Numbers are marked automatically.\n"
+    "Claims will be auto-verified.\n"
     "Sheet bonuses apply based on ticket count.\n"
-    "Claims are verified by admin."
+    "Winners are auto verified and awarded.\n"
+    "Prizes will be distributed manually by admin/host.\n"
 )
+
 
 ACTIVE_STATUS_VALUES = {
     Game.Status.ACTIVE,
@@ -73,6 +91,99 @@ ACTIVE_STATUS_VALUES = {
     Game.Status.RUNNING,
     Game.Status.PAUSED,
 }
+
+ANNOUNCEMENT_AUDIO_DIR = "announcement_audio"
+ANNOUNCEMENT_AUDIO_EXTENSION_DEFAULT = ".webm"
+ANNOUNCEMENT_AUDIO_EXTENSION_BY_CONTENT_TYPE = {
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/mp4": ".m4a",
+    "audio/aac": ".aac",
+}
+ANNOUNCEMENT_AUDIO_EXTENSIONS = {".webm", ".ogg", ".mp3", ".wav", ".m4a", ".aac", ".mpeg", ".oga"}
+
+
+def _announcement_media_root() -> Path:
+    return Path(settings.BASE_DIR) / "media"
+
+
+def _resolve_audio_extension(file_name: str, content_type: str) -> str:
+    safe_name = str(file_name or "").strip().lower()
+    suffix = Path(safe_name).suffix
+    if suffix in ANNOUNCEMENT_AUDIO_EXTENSIONS:
+        return suffix
+
+    normalized_content_type = str(content_type or "").split(";")[0].strip().lower()
+    mapped_extension = ANNOUNCEMENT_AUDIO_EXTENSION_BY_CONTENT_TYPE.get(normalized_content_type)
+    if mapped_extension:
+        return mapped_extension
+
+    guessed_extension = mimetypes.guess_extension(normalized_content_type, strict=False) or ""
+    if guessed_extension in ANNOUNCEMENT_AUDIO_EXTENSIONS:
+        return guessed_extension
+
+    return ANNOUNCEMENT_AUDIO_EXTENSION_DEFAULT
+
+
+def _save_announcement_audio(*, game_id, audio_clip):
+    media_root = _announcement_media_root()
+    target_dir = media_root / ANNOUNCEMENT_AUDIO_DIR / str(game_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    extension = _resolve_audio_extension(
+        file_name=getattr(audio_clip, "name", ""),
+        content_type=getattr(audio_clip, "content_type", ""),
+    )
+    final_name = f"{uuid.uuid4().hex}{extension}"
+    final_path = target_dir / final_name
+    relative_path = (Path(ANNOUNCEMENT_AUDIO_DIR) / str(game_id) / final_name).as_posix()
+
+    temp_file = tempfile.NamedTemporaryFile(delete=False, dir=str(target_dir), suffix=".tmp")
+    try:
+        for chunk in audio_clip.chunks():
+            temp_file.write(chunk)
+        temp_file.close()
+        os.replace(temp_file.name, final_path)
+    finally:
+        if os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
+
+    content_type = str(getattr(audio_clip, "content_type", "") or "").split(";")[0].strip().lower()
+    if not content_type.startswith("audio/"):
+        content_type = ""
+
+    return relative_path, content_type
+
+
+def _resolve_announcement_audio_path(relative_path: str):
+    if not relative_path:
+        return None
+
+    media_root = _announcement_media_root().resolve()
+    candidate = (media_root / str(relative_path)).resolve()
+    try:
+        candidate.relative_to(media_root)
+    except ValueError:
+        return None
+
+    if not candidate.exists() or not candidate.is_file():
+        return None
+
+    return candidate
+
+
+def _announcement_audio_url(*, request, game_id, announcement_id, audio_file):
+    if not audio_file:
+        return None
+    url = reverse(
+        "game-announcement-audio",
+        kwargs={"game_id": game_id, "announcement_id": announcement_id},
+    )
+    return request.build_absolute_uri(url)
 
 
 def _configured_status():
@@ -104,12 +215,21 @@ def _mark_game_finished_if_numbers_exhausted(game):
         locked_game.save(update_fields=["status"])
 
     channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        f"game_{str(game.id)}",
-        {
-            "type": "game_finished",
-            "status": "ENDED",
-        },
+    try:
+        async_to_sync(channel_layer.group_send)(
+            f"game_{str(game.id)}",
+            {
+                "type": "game_finished",
+                "status": "ENDED",
+            },
+        )
+    except Exception as exc:
+        logger.warning("Group broadcast failed (game_finished): %s", exc)
+    broadcast_game_voice_event(
+        game_id=game.id,
+        event="game_end",
+        voice_key=GAME_END_VOICE_KEY,
+        voice_text=GAME_END_VOICE_TEXT,
     )
     return True
 
@@ -504,13 +624,22 @@ class AdminStartGameView(APIView):
 
         auto_call_numbers.delay(game.id)
         channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"game_{str(game.id)}",
-            {
-                "type": "game_started",
-                "message": "GAME_STARTED",
-                "calling_interval": game.calling_interval,
-            },
+        try:
+            async_to_sync(channel_layer.group_send)(
+                f"game_{str(game.id)}",
+                {
+                    "type": "game_started",
+                    "message": "GAME_STARTED",
+                    "calling_interval": game.calling_interval,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Group broadcast failed (game_started): %s", exc)
+        broadcast_game_voice_event(
+            game_id=game.id,
+            event="game_start",
+            voice_key=GAME_START_VOICE_KEY,
+            voice_text=GAME_START_VOICE_TEXT,
         )
         _broadcast_game_update(
             game,
@@ -627,6 +756,16 @@ class AdminCallNextNumberView(APIView):
                 status=400,
             )
 
+        winner_hold_remaining = get_winner_announcement_hold_remaining(game_id=game.id)
+        if winner_hold_remaining > 0:
+            return Response(
+                {
+                    "detail": "Winner announcement is in progress. Number calling is temporarily paused.",
+                    "retry_after_seconds": max(1, math.ceil(winner_hold_remaining)),
+                },
+                status=409,
+            )
+
         try:
             number = call_next_number(game)
         except (ValueError, RuntimeError) as exc:
@@ -679,31 +818,80 @@ class AdminGameAnnouncementView(APIView):
             first_error = serializer.errors.get(first_error_key, ["Invalid payload."])[0]
             return Response({"detail": str(first_error)}, status=400)
 
-        message = serializer.validated_data["message"]
+        message = serializer.validated_data.get("message", "")
+        audio_clip = serializer.validated_data.get("audio_clip")
+
+        audio_file = ""
+        audio_mime_type = ""
+        if audio_clip is not None:
+            try:
+                audio_file, audio_mime_type = _save_announcement_audio(
+                    game_id=game.id,
+                    audio_clip=audio_clip,
+                )
+            except OSError:
+                return Response({"detail": "Unable to store announcement audio."}, status=500)
+
+        if not message and audio_file:
+            message = "Voice announcement"
+
         announcement = Announcement.objects.create(
             game=game,
             message=message,
+            audio_file=audio_file,
+            audio_mime_type=audio_mime_type,
             created_by=request.user if request.user.is_authenticated else None,
             is_active=True,
         )
 
+        audio_url = _announcement_audio_url(
+            request=request,
+            game_id=game.id,
+            announcement_id=announcement.id,
+            audio_file=announcement.audio_file,
+        )
         payload = {
             "message": announcement.message,
             "timestamp": timezone.localtime(announcement.created_at).isoformat(),
             "game_id": str(game.id),
             "announcement_id": announcement.id,
+            "audio_url": audio_url,
+            "audio_mime_type": announcement.audio_mime_type or None,
         }
 
         channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"game_{str(game.id)}",
-            {
-                "type": "announcement_broadcast",
-                **payload,
-            },
-        )
+        try:
+            async_to_sync(channel_layer.group_send)(
+                f"game_{str(game.id)}",
+                {
+                    "type": "announcement_broadcast",
+                    **payload,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Group broadcast failed (announcement_broadcast): %s", exc)
 
         return Response(payload, status=201)
+
+
+class GameAnnouncementAudioView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, game_id, announcement_id):
+        announcement = get_object_or_404(
+            Announcement.objects.only("id", "game_id", "audio_file", "audio_mime_type", "is_active"),
+            id=announcement_id,
+            game_id=game_id,
+            is_active=True,
+        )
+
+        audio_path = _resolve_announcement_audio_path(announcement.audio_file)
+        if audio_path is None:
+            return Response({"detail": "Announcement audio not found."}, status=404)
+
+        content_type = str(announcement.audio_mime_type or "").strip() or "audio/mpeg"
+        return FileResponse(audio_path.open("rb"), content_type=content_type)
 
 
 class AdminGameListCreateView(APIView):

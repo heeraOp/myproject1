@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { type AnnouncementType, useAnnouncementStore } from '@/app/store/announcement.store'
 import { initGlobalAudioUnlock, playAudioElementSafely } from '@/utils/audioEngine'
+import { queueSpeakText, type VoiceType } from '@/utils/speakText'
+import { isVoiceAnnouncement, stripVoiceAnnouncementPrefix } from '@/utils/announcementVoice'
 import './AnnouncementBanner.css'
 
 type AnnouncementBannerProps = {
@@ -43,6 +45,13 @@ const detectTypeFromMessage = (message: string, fallback?: AnnouncementType): An
 const stripTypePrefix = (message: string): string =>
   message.replace(/^\s*\[(info|success|warning|danger)\]\s*/i, '').replace(/^\s*(info|success|warning|danger)\s*:\s*/i, '')
 
+const resolveVoiceTypeForAnnouncement = (type: AnnouncementType): VoiceType => {
+  if (type === 'danger') return 'dramatic'
+  if (type === 'warning') return 'savage'
+  if (type === 'success') return 'funny'
+  return 'normal'
+}
+
 const AnnouncementBanner = ({
   gameId,
   autoHideMs = 4000,
@@ -60,6 +69,7 @@ const AnnouncementBanner = ({
     danger: null,
   })
   const activeAudioRef = useRef<HTMLAudioElement | null>(null)
+  const activeVoiceAudioRef = useRef<HTMLAudioElement | null>(null)
 
   const latestAnnouncement = useMemo(() => {
     const scoped = gameId
@@ -68,11 +78,17 @@ const AnnouncementBanner = ({
     return scoped.length ? scoped[scoped.length - 1] : null
   }, [announcements, gameId])
 
+  const rawAnnouncementMessage = latestAnnouncement?.message ?? ''
+  const voiceAnnouncement = isVoiceAnnouncement(rawAnnouncementMessage)
+  const messageWithoutVoicePrefix = stripVoiceAnnouncementPrefix(rawAnnouncementMessage)
+  const announcementAudioUrl = String(latestAnnouncement?.audioUrl ?? '').trim()
+  const hasAnnouncementAudioClip = announcementAudioUrl.length > 0
   const announcementType = detectTypeFromMessage(
-    latestAnnouncement?.message ?? '',
+    messageWithoutVoicePrefix,
     latestAnnouncement?.type,
   )
-  const announcementMessage = stripTypePrefix(latestAnnouncement?.message ?? '')
+  const strippedMessage = stripTypePrefix(messageWithoutVoicePrefix).trim()
+  const announcementMessage = strippedMessage || (hasAnnouncementAudioClip ? 'Voice announcement' : '')
   const icon = ICON_MAP[announcementType]
 
   useEffect(() => {
@@ -118,8 +134,55 @@ const AnnouncementBanner = ({
         nextAudio.currentTime = 0
         void playAudioElementSafely(nextAudio)
       }
+
+      if (activeVoiceAudioRef.current) {
+        activeVoiceAudioRef.current.pause()
+        activeVoiceAudioRef.current.currentTime = 0
+        activeVoiceAudioRef.current = null
+      }
+
+      if (hasAnnouncementAudioClip) {
+        const announcementVoiceAudio = new Audio(announcementAudioUrl)
+        announcementVoiceAudio.preload = 'auto'
+        activeVoiceAudioRef.current = announcementVoiceAudio
+
+        const clearVoiceAudio = () => {
+          if (activeVoiceAudioRef.current === announcementVoiceAudio) {
+            activeVoiceAudioRef.current = null
+          }
+        }
+
+        announcementVoiceAudio.onended = clearVoiceAudio
+        announcementVoiceAudio.onerror = clearVoiceAudio
+        void playAudioElementSafely(announcementVoiceAudio).then((played) => {
+          if (played) return
+          clearVoiceAudio()
+          if (voiceAnnouncement && announcementMessage) {
+            void queueSpeakText(announcementMessage, resolveVoiceTypeForAnnouncement(announcementType), {
+              rate: 1,
+              pitch: 1,
+            })
+          }
+        })
+      } else if (voiceAnnouncement && announcementMessage) {
+        void queueSpeakText(announcementMessage, resolveVoiceTypeForAnnouncement(announcementType), {
+          rate: 1,
+          pitch: 1,
+        })
+      }
     }
-  }, [latestAnnouncement?.id, latestAnnouncement, announcementType, autoHideMs, dismissAnnouncement, enableSound])
+  }, [
+    latestAnnouncement?.id,
+    latestAnnouncement,
+    announcementType,
+    announcementMessage,
+    announcementAudioUrl,
+    hasAnnouncementAudioClip,
+    voiceAnnouncement,
+    autoHideMs,
+    dismissAnnouncement,
+    enableSound,
+  ])
 
   useEffect(() => {
     return () => {
@@ -134,6 +197,10 @@ const AnnouncementBanner = ({
       if (activeAudioRef.current) {
         activeAudioRef.current.pause()
         activeAudioRef.current.currentTime = 0
+      }
+      if (activeVoiceAudioRef.current) {
+        activeVoiceAudioRef.current.pause()
+        activeVoiceAudioRef.current.currentTime = 0
       }
     }
   }, [])

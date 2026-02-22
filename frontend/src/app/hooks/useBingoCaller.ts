@@ -36,9 +36,12 @@ const AUDIO_BLOCKED_TEXT =
   'Sound is blocked by your browser or system. Please unmute your browser and press Enable Sound.'
 
 const resolveVoiceTypeForMode = (mode: VoiceMode): VoiceType => {
+  if (mode === 'FEMALE_SHOUT') return 'female_shout'
   if (mode === 'FUNNY' || mode === 'FUNNY_CARTOON' || mode === 'FUNNY_COMEDIC' || mode === 'FUNNY_CRAZY') {
     return 'funny'
   }
+  if (mode === 'SPORTS_COMMENTATOR') return 'savage'
+  if (mode === 'ROYAL_COMMANDER') return 'dramatic'
   if (mode === 'CRAZY') return 'savage'
   if (mode === 'MALE_DEEP' || mode === 'MALE_ENERGETIC') return 'dramatic'
   return 'normal'
@@ -60,6 +63,7 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
   const previousCalledSetRef = useRef<Set<number>>(new Set())
   const clearTimerRef = useRef<number | null>(null)
   const pendingSpeechRef = useRef<PendingSpeechAnnouncement | null>(null)
+  const voiceEventPlaybackActiveRef = useRef(false)
 
   useEffect(() => {
     initGlobalAudioUnlock()
@@ -110,6 +114,29 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
     },
     [audioUnlocked, voiceSpeed],
   )
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const onVoiceEventPlaybackStarted = () => {
+      voiceEventPlaybackActiveRef.current = true
+    }
+    const onVoiceEventPlaybackEnded = () => {
+      voiceEventPlaybackActiveRef.current = false
+      const pending = pendingSpeechRef.current
+      pendingSpeechRef.current = null
+      if (pending && audioUnlocked && soundEnabled) {
+        void speakAnnouncement(pending.number, pending.text, pending.voiceMode)
+      }
+    }
+
+    window.addEventListener('voice-event-playback-started', onVoiceEventPlaybackStarted)
+    window.addEventListener('voice-event-playback-ended', onVoiceEventPlaybackEnded)
+    return () => {
+      window.removeEventListener('voice-event-playback-started', onVoiceEventPlaybackStarted)
+      window.removeEventListener('voice-event-playback-ended', onVoiceEventPlaybackEnded)
+    }
+  }, [audioUnlocked, soundEnabled, speakAnnouncement])
 
   const unlockAudio = useCallback(() => {
     if (typeof window === 'undefined') return
@@ -176,6 +203,8 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
     if (!soundEnabled) {
       pendingSpeechRef.current = null
     } else if (!audioUnlocked) {
+      pendingSpeechRef.current = { number: calledNumber, text, voiceMode }
+    } else if (voiceEventPlaybackActiveRef.current) {
       pendingSpeechRef.current = { number: calledNumber, text, voiceMode }
     } else if (isWinnerSoundFlowActive()) {
       // If a winner sound flow is active, queue the call so it plays when the

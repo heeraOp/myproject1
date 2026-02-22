@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .lobby_announcement_views import AdminLobbyAnnouncementManageView
 from .views import (
     AdminGameAnnouncementView,
     AdminAgentListView,
@@ -7,6 +8,7 @@ from .views import (
     CurrentAdminGameView,
     CurrentPublicGameView,
     GameMetaView,
+    GameAnnouncementAudioView,
     PublicSupportSettingsView,
     AdminGameListCreateView,
     AdminGameThemeView,
@@ -38,6 +40,16 @@ urlpatterns = [
     path("<uuid:game_id>/announce/", AdminGameAnnouncementView.as_view(), name="admin-game-announce"),
     # Compatibility route for clients that omit trailing slash.
     path("<uuid:game_id>/announce", AdminGameAnnouncementView.as_view(), name="admin-game-announce-no-slash"),
+    path(
+        "<uuid:game_id>/announcements/<int:announcement_id>/audio/",
+        GameAnnouncementAudioView.as_view(),
+        name="game-announcement-audio",
+    ),
+    path(
+        "<uuid:game_id>/announcements/<int:announcement_id>/audio",
+        GameAnnouncementAudioView.as_view(),
+        name="game-announcement-audio-no-slash",
+    ),
     path("<uuid:game_id>/state/", GameStateView.as_view(), name="game-state"),
     path("<uuid:game_id>/tickets/", GameTicketsView.as_view(), name="game-tickets"),
     path("<uuid:game_id>/summary/", GameSummaryView.as_view(), name="game-summary"),
@@ -51,4 +63,9 @@ urlpatterns = [
     path("admin/<uuid:game_id>/reset-ticket/", AdminResetTicketView.as_view(), name="admin-game-reset-ticket"),
     path("admin/<uuid:game_id>/reset-agent/", AdminResetAgentView.as_view(), name="admin-game-reset-agent"),
     path("admin/<uuid:game_id>/recreate/", AdminRecreateGameView.as_view(), name="admin-game-recreate"),
+    path(
+        "admin/<uuid:game_id>/lobby-announcement/",
+        AdminLobbyAnnouncementManageView.as_view(),
+        name="admin-game-lobby-announcement",
+    ),
 ]

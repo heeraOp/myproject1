@@ -1,9 +1,12 @@
 import type { VoiceMode } from '@/app/store/voiceMode.store'
+import { femaleShoutVoiceProfile } from '@/voices/profiles/femaleShout'
 import { getFunnyBingoSpeechText, getFunnyVoiceStyle } from '@/utils/bingoCalls'
 import { funnyCartoonVoiceProfile } from '@/voices/profiles/funnyCartoon'
 import { funnyCrazyVoiceProfile } from '@/voices/profiles/funnyCrazy'
 import { maleDeepVoiceProfile } from '@/voices/profiles/maleDeep'
 import { maleEnergeticVoiceProfile } from '@/voices/profiles/maleEnergetic'
+import { royalCommanderVoiceProfile } from '@/voices/profiles/royalCommander'
+import { sportsCommentatorVoiceProfile } from '@/voices/profiles/sportsCommentator'
 import type { VoiceProfile } from '@/voices/types'
 
 const defaultVoicePattern = /(fred|samantha|zira|david|daniel|karen|google uk english male)/i
@@ -37,10 +40,13 @@ const crazyVoiceProfile: VoiceProfile = {
 
 export const VOICE_PROFILE_REGISTRY: Record<VoiceMode, VoiceProfile> = {
   CLASSIC: classicVoiceProfile,
+  FEMALE_SHOUT: femaleShoutVoiceProfile,
   FUNNY: funnyVoiceProfile,
   CRAZY: crazyVoiceProfile,
   MALE_DEEP: maleDeepVoiceProfile,
   MALE_ENERGETIC: maleEnergeticVoiceProfile,
+  ROYAL_COMMANDER: royalCommanderVoiceProfile,
+  SPORTS_COMMENTATOR: sportsCommentatorVoiceProfile,
   FUNNY_CARTOON: funnyCartoonVoiceProfile,
   FUNNY_COMEDIC: funnyCrazyVoiceProfile,
   FUNNY_CRAZY: funnyCrazyVoiceProfile,

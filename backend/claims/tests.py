@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from unittest.mock import patch
 
 from claims.models import Claim, Prize, Winner
 from claims.utils.evaluator import _normalize_prize_type, evaluate_claims_for_game
@@ -123,3 +124,15 @@ class EvaluateClaimsForGameTests(TestCase):
         self.assertEqual(len(newly_claimed), 1)
         self.assertEqual(_normalize_prize_type(newly_claimed[0].prize_type), "FULL_SHEET")
         self.assertEqual(game.status, Game.Status.RUNNING)
+
+    @patch("claims.utils.evaluator.set_winner_announcement_hold")
+    def test_sets_winner_announcement_hold_when_a_prize_is_claimed(self, mock_set_hold):
+        game = self._create_game()
+        Prize.objects.create(game=game, prize_type="FULL_SHEET", amount=1000, enabled=True)
+        self._create_confirmed_tickets(game, "Alice", [1, 2, 3, 4, 5, 6])
+        self._seed_called_numbers(game, [1, 2, 3, 4, 5, 6])
+
+        newly_claimed = evaluate_claims_for_game(game)
+
+        self.assertEqual(len(newly_claimed), 1)
+        mock_set_hold.assert_called_once_with(game_id=game.id)

@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -141,7 +142,7 @@ class TicketBookingFlowTests(APITestCase):
         self.assertEqual(response.data["booking_type"], "random")
         self.assertTrue(response.data["booking_id"] > 0)
         self.assertEqual(response.data["payment_status"], "PENDING")
-        self.assertIn("https://wa.me/", response.data["whatsapp_redirect_url"])
+        self.assertIn("https://api.whatsapp.com/send?phone=", response.data["whatsapp_redirect_url"])
         self.assertTrue(response.data["eligible_privileges"]["normal_prizes"])
         self.assertTrue(response.data["eligible_privileges"]["half_sheet_bonus"])
         self.assertFalse(response.data["eligible_privileges"]["full_sheet_bonus"])
@@ -173,4 +174,25 @@ class TicketBookingFlowTests(APITestCase):
         self.client.force_authenticate(user=None)
         response = self.client.post("/api/tickets/request-booking/", payload, format="json")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("https://wa.me/919111111111", response.data["whatsapp_redirect_url"])
+        self.assertIn("https://api.whatsapp.com/send?phone=919111111111", response.data["whatsapp_redirect_url"])
+
+    @override_settings(WHATSAPP_DEFAULT_COUNTRY_CODE="")
+    def test_player_bulk_booking_redirect_normalizes_local_10_digit_whatsapp(self):
+        self.agent.whatsapp_number = "8837377528"
+        self.agent.save(update_fields=["whatsapp_number"])
+        settings_row = GameSettings.objects.order_by("-id").first()
+        settings_row.agent_whatsapp_number = "8837377528"
+        settings_row.save(update_fields=["agent_whatsapp_number"])
+
+        payload = {
+            "game_id": str(self.game.id),
+            "ticket_numbers": [14, 15, 16],
+            "booking_type": "random",
+            "player_name": "Player Four",
+            "whatsapp": "9012345699",
+            "payment_mode": "Cheque",
+        }
+        self.client.force_authenticate(user=None)
+        response = self.client.post("/api/tickets/request-booking/", payload, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("https://api.whatsapp.com/send?phone=918837377528", response.data["whatsapp_redirect_url"])
