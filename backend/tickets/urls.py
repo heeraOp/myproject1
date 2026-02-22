@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     AdminBulkTicketGenerateView,
     AdminTicketBookingView,
+    PlayerBulkTicketBookingView,
     TicketRequestBookingView,
     PublicLatestTicketListView,
     PublicTicketListView,
@@ -11,6 +12,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path("request-booking/", PlayerBulkTicketBookingView.as_view(), name="player-bulk-ticket-booking"),
     path("<uuid:ticket_id>/request-booking/", TicketRequestBookingView.as_view(), name="ticket-request-booking"),
     path("admin/book/", AdminTicketBookingView.as_view(), name="admin-ticket-book"),
     path("admin/generate/", AdminBulkTicketGenerateView.as_view(), name="admin-ticket-generate"),

@@ -14,8 +14,8 @@ from django.db import transaction
 from rest_framework.views import APIView
 
 from common.permissions import IsAdminRole, is_admin_user
-from .models import Agent, Game, Announcement
-from .serializers import AnnouncementCreateSerializer
+from .models import Agent, Announcement, Game, GameSettings
+from .serializers import AnnouncementCreateSerializer, GameMetaSerializer, GameRecreateSerializer
 from .utils.calling import call_next_number
 from .utils.leaderboard import build_live_leaderboard
 from .tasks import auto_call_numbers
@@ -28,6 +28,51 @@ from tickets.utils.generator import generate_housie_ticket
 
 
 logger = logging.getLogger(__name__)
+
+
+PRIZE_LABEL_OVERRIDES = {
+    "HALF_SHEET": "Half Sheet Bonus",
+    "FULL_SHEET": "Full Sheet Bonus",
+}
+
+PRIZE_RULE_EXPLANATIONS = {
+    "EARLY_5": "Any 5 numbers on a confirmed ticket must be called.",
+    "QUICK_6": "Any 6 numbers on a confirmed ticket must be called.",
+    "QUICK_7": "Any 7 numbers on a confirmed ticket must be called.",
+    "TOP_LINE": "All numbers in the top row must be called.",
+    "MIDDLE_LINE": "All numbers in the middle row must be called.",
+    "BOTTOM_LINE": "All numbers in the bottom row must be called.",
+    "BOX": "At least 2 numbers in each row must be called (minimum 6 total).",
+    "CORNER": "First and last numbers of top and bottom rows must be called.",
+    "STAR": "All corners plus the middle-row center number must be called.",
+    "FIRST_HOUSE": "All ticket numbers must be called (full house validation).",
+    "SECOND_HOUSE": "All ticket numbers must be called (full house validation).",
+    "THIRD_HOUSE": "All ticket numbers must be called (full house validation).",
+    "HALF_SHEET": (
+        "Player must own at least 3 confirmed tickets in the same player name, and each of those "
+        "tickets must have at least one called number."
+    ),
+    "FULL_SHEET": (
+        "Player must own at least 6 confirmed tickets in the same player name, and each of those "
+        "tickets must have at least one called number. If a Half Sheet prize is still pending, "
+        "Full Sheet is evaluated only after Half Sheet is settled."
+    ),
+}
+
+DEFAULT_HOW_TO_PLAY = (
+    "Numbers are called live.\n"
+    "Mark numbers on your ticket.\n"
+    "Claim prize patterns before others.\n"
+    "Sheet bonuses apply based on ticket count.\n"
+    "Claims are verified by admin."
+)
+
+ACTIVE_STATUS_VALUES = {
+    Game.Status.ACTIVE,
+    Game.Status.BOOKING_OPEN,
+    Game.Status.RUNNING,
+    Game.Status.PAUSED,
+}
 
 
 def _configured_status():
@@ -100,6 +145,111 @@ def _agent_payload(agent):
     }
 
 
+def _normalize_whatsapp(value):
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def _sync_latest_game_settings(game):
+    if game is None:
+        return
+
+    game_name = str(getattr(game, "name", "") or "").strip()
+    agent = getattr(game, "agent", None)
+    agent_whatsapp = str(getattr(agent, "whatsapp_number", "") or "").strip()
+    if not game_name or not agent_whatsapp:
+        return
+
+    latest = GameSettings.objects.order_by("-id").first()
+    if latest is None:
+        GameSettings.objects.create(
+            game_name=game_name,
+            agent_whatsapp_number=agent_whatsapp,
+        )
+        return
+
+    update_fields = []
+    if latest.game_name != game_name:
+        latest.game_name = game_name
+        update_fields.append("game_name")
+    if latest.agent_whatsapp_number != agent_whatsapp:
+        latest.agent_whatsapp_number = agent_whatsapp
+        update_fields.append("agent_whatsapp_number")
+    if update_fields:
+        latest.save(update_fields=update_fields)
+
+
+def _normalize_prize_type_key(value):
+    text = str(value or "").strip().upper()
+    normalized = text.replace(" ", "_").replace("-", "_")
+    if normalized == "HALF_SHEET_BONUS":
+        return "HALF_SHEET"
+    if normalized == "FULL_SHEET_BONUS":
+        return "FULL_SHEET"
+    return normalized
+
+
+def _prize_label_for_type(prize_type, label_map):
+    normalized = _normalize_prize_type_key(prize_type)
+    if not normalized:
+        return "Unknown Prize"
+    return (
+        PRIZE_LABEL_OVERRIDES.get(normalized)
+        or label_map.get(normalized)
+        or label_map.get(str(prize_type).strip())
+        or normalized.replace("_", " ").title()
+    )
+
+
+def _prize_explanation_for_type(prize_type):
+    normalized = _normalize_prize_type_key(prize_type)
+    if not normalized:
+        return "Prize rule is not available."
+    return PRIZE_RULE_EXPLANATIONS.get(
+        normalized,
+        "Win condition follows admin-configured server-side validation for this prize.",
+    )
+
+
+def _prize_pattern_details_for_game(game):
+    label_map = dict(Prize.PrizeType.choices)
+    enabled_prizes = list(Prize.objects.filter(game=game, enabled=True).order_by("id"))
+    source_types = (
+        [prize.prize_type for prize in enabled_prizes]
+        if enabled_prizes
+        else [choice[0] for choice in Prize.PrizeType.choices]
+    )
+
+    details = []
+    seen = set()
+    for prize_type in source_types:
+        normalized = _normalize_prize_type_key(prize_type)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        details.append(
+            {
+                "prize_type": normalized,
+                "label": _prize_label_for_type(prize_type, label_map),
+                "explanation": _prize_explanation_for_type(prize_type),
+            }
+        )
+    return details
+
+
+def _prize_patterns_for_game(game):
+    label_map = dict(Prize.PrizeType.choices)
+    patterns = []
+    seen = set()
+    prizes = Prize.objects.filter(game=game, enabled=True).order_by("id")
+    for prize in prizes:
+        label = _prize_label_for_type(prize.prize_type, label_map)
+        if label in seen:
+            continue
+        seen.add(label)
+        patterns.append(label)
+    return patterns
+
+
 def _admin_game_payload(game):
     game_datetime = timezone.localtime(game.game_datetime) if timezone.is_aware(game.game_datetime) else game.game_datetime
     return {
@@ -116,7 +266,22 @@ def _admin_game_payload(game):
         "agent": _agent_payload(game.agent),
         "active_theme": game.active_theme,
         "is_active": game.is_active,
+        "version": int(getattr(game, "version", 1)),
+        "is_current": bool(getattr(game, "is_current", False)),
+        "recreated_from": str(game.recreated_from_id) if getattr(game, "recreated_from_id", None) else None,
+        "recreated_at": timezone.localtime(game.recreated_at).isoformat()
+        if getattr(game, "recreated_at", None)
+        else None,
+        "reason": game.reason or None,
     }
+
+
+def _get_current_game_queryset():
+    return Game.objects.filter(is_current=True)
+
+
+def _get_current_game():
+    return _get_current_game_queryset().first()
 
 
 def _broadcast_game_update(game, changed_fields):
@@ -137,6 +302,32 @@ def _broadcast_game_update(game, changed_fields):
         )
     except Exception as exc:
         logger.warning("Group broadcast failed (game_update): %s", str(exc))
+
+
+def _broadcast_game_recreated(*, original_game, new_game, reason):
+    payload = {
+        "old_game_id": str(original_game.id),
+        "new_game_id": str(new_game.id),
+        "reason": reason,
+        "new_game": _admin_game_payload(new_game),
+    }
+    channel_layer = get_channel_layer()
+    target_groups = {
+        "global_lobby",
+        f"game_{str(original_game.id)}",
+        f"game_{str(new_game.id)}",
+    }
+    for group_name in target_groups:
+        try:
+            async_to_sync(channel_layer.group_send)(
+                group_name,
+                {
+                    "type": "game_recreated",
+                    "data": payload,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Group broadcast failed (game_recreated): %s", str(exc))
 
 
 class AdminGameCreateSerializer(serializers.Serializer):
@@ -608,6 +799,7 @@ class AdminGameListCreateView(APIView):
 
                 if update_fields:
                     game.save(update_fields=update_fields)
+                _sync_latest_game_settings(game)
 
             game_payload = _admin_game_payload(game)
             if changed_fields:
@@ -630,6 +822,7 @@ class AdminGameListCreateView(APIView):
 
         with transaction.atomic():
             Game.objects.filter(is_active=True).update(is_active=False)
+            Game.objects.filter(is_current=True).update(is_current=False)
 
             game = Game.objects.create(
                 name=name,
@@ -644,8 +837,10 @@ class AdminGameListCreateView(APIView):
                 calling_interval=calling_interval if calling_interval is not None else 10,
                 active_theme=active_theme,
                 is_active=True,
+                is_current=True,
                 created_by=request.user,
             )
+            _sync_latest_game_settings(game)
 
             # Pre-generate all tickets immediately on game setup (avoid lazy generation).
             if not Ticket.objects.filter(game=game).exists():
@@ -699,6 +894,166 @@ class AdminGameListCreateView(APIView):
         return Response(game_payload, status=201)
 
 
+class AdminRecreateGameView(APIView):
+    permission_classes = [IsAdminRole]
+    authentication_classes = [SessionAuthentication]
+
+    def post(self, request, game_id):
+        serializer = GameRecreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            first_error_key = next(iter(serializer.errors), None)
+            first_error = serializer.errors.get(first_error_key, ["Invalid payload."])[0]
+            return Response({"detail": str(first_error)}, status=400)
+
+        reason = serializer.validated_data["reason"]
+        updated_fields = serializer.validated_data.get("updated_fields", {})
+
+        with transaction.atomic():
+            original_game = get_object_or_404(
+                Game.objects.select_for_update().select_related("agent"),
+                id=game_id,
+            )
+
+            # Prevent concurrent "current game" conflicts during recreation.
+            Game.objects.select_for_update().filter(is_current=True)
+
+            has_ticket_bookings = (
+                Ticket.objects.select_for_update()
+                .filter(game=original_game)
+                .exclude(status=Ticket.Status.AVAILABLE)
+                .exists()
+            )
+
+            is_created = original_game.status == Game.Status.CREATED
+            is_active_like = original_game.status in ACTIVE_STATUS_VALUES
+            if not is_created and not is_active_like:
+                return Response(
+                    {"detail": "Game can only be recreated from CREATED or ACTIVE status."},
+                    status=400,
+                )
+
+            if is_active_like and has_ticket_bookings:
+                return Response(
+                    {"detail": "Cannot recreate an active game with existing bookings."},
+                    status=400,
+                )
+
+            date_input = (
+                updated_fields.get("date")
+                if "date" in updated_fields
+                else updated_fields.get("game_datetime", original_game.game_datetime)
+            )
+            total_tickets_input = (
+                updated_fields.get("total_tickets")
+                if "total_tickets" in updated_fields
+                else updated_fields.get("total_ticket_limit", original_game.total_ticket_limit)
+            )
+            config_payload = {
+                "name": updated_fields.get("name", original_game.name),
+                "date": date_input,
+                "ticket_price": updated_fields.get("ticket_price", original_game.ticket_price),
+                "total_tickets": total_tickets_input,
+                "calling_interval": updated_fields.get("calling_interval", original_game.calling_interval),
+                "agent_commission": updated_fields.get("agent_commission", original_game.agent_commission),
+                "agent_id": updated_fields.get("agent_id", original_game.agent_id),
+                "booking_status": updated_fields.get("booking_status", original_game.booking_status),
+                "website_status": updated_fields.get("website_status", original_game.website_status),
+                "active_theme": updated_fields.get("active_theme", original_game.active_theme),
+            }
+            config_serializer = AdminGameCreateSerializer(data=config_payload)
+            if not config_serializer.is_valid():
+                first_error_key = next(iter(config_serializer.errors), None)
+                first_error = config_serializer.errors.get(first_error_key, ["Invalid updated_fields."])[0]
+                return Response({"detail": str(first_error)}, status=400)
+            config = config_serializer.validated_data
+
+            status_value = str(updated_fields.get("status", Game.Status.CREATED)).strip().upper()
+            if status_value not in {Game.Status.CREATED, Game.Status.ACTIVE}:
+                return Response({"detail": "Recreated game status must be CREATED or ACTIVE."}, status=400)
+
+            now = timezone.now()
+            original_game.is_current = False
+            original_game.is_active = False
+            original_game.status = Game.Status.CANCELLED
+            original_game.recreated_at = now
+            original_game.recreated_by = request.user
+            original_game.reason = reason
+            original_game.save(
+                update_fields=[
+                    "is_current",
+                    "is_active",
+                    "status",
+                    "recreated_at",
+                    "recreated_by",
+                    "reason",
+                ]
+            )
+
+            Game.objects.filter(is_current=True).exclude(id=original_game.id).update(
+                is_current=False,
+                is_active=False,
+            )
+
+            new_game = Game.objects.create(
+                name=config["name"],
+                status=status_value,
+                game_datetime=config["date"],
+                ticket_price=config["ticket_price"],
+                agent_commission=config["agent_commission"],
+                total_ticket_limit=config["total_tickets"],
+                booking_status=config["booking_status"],
+                website_status=config["website_status"],
+                active_theme=config["active_theme"],
+                calling_interval=config.get("calling_interval") or original_game.calling_interval or 10,
+                agent=config.get("agent_id"),
+                created_by=request.user,
+                is_active=True,
+                is_current=True,
+                version=int(original_game.version) + 1,
+                recreated_from=original_game,
+                recreated_at=now,
+                recreated_by=request.user,
+                reason=reason,
+            )
+            _sync_latest_game_settings(new_game)
+
+            source_prizes = list(
+                Prize.objects.filter(game=original_game).values("prize_type", "amount", "enabled")
+            )
+            if source_prizes:
+                Prize.objects.bulk_create(
+                    [
+                        Prize(
+                            game=new_game,
+                            prize_type=entry["prize_type"],
+                            amount=entry["amount"],
+                            enabled=bool(entry["enabled"]),
+                        )
+                        for entry in source_prizes
+                    ]
+                )
+
+            tickets = []
+            for ticket_number in range(1, int(new_game.total_ticket_limit) + 1):
+                tickets.append(
+                    Ticket(
+                        game=new_game,
+                        ticket_number=ticket_number,
+                        ticket_type=Ticket.TicketType.RANDOM,
+                        ticket_data=generate_housie_ticket(),
+                        status=Ticket.Status.AVAILABLE,
+                    )
+                )
+            Ticket.objects.bulk_create(tickets)
+
+        _broadcast_game_recreated(
+            original_game=original_game,
+            new_game=new_game,
+            reason=reason,
+        )
+        return Response(_admin_game_payload(new_game), status=201)
+
+
 class CurrentAdminGameView(APIView):
     """
     Admin-only endpoint to fetch the single active game.
@@ -708,7 +1063,7 @@ class CurrentAdminGameView(APIView):
     authentication_classes = [SessionAuthentication]
 
     def get(self, request):
-        game = Game.objects.filter(is_active=True).first()
+        game = _get_current_game()
         if game is None:
             return Response({"detail": "No active game found."}, status=404)
         return Response(_admin_game_payload(game))
@@ -725,7 +1080,7 @@ class AdminAgentListView(APIView):
     def _broadcast_agent_update(self, agent):
         changed_fields = {"agent": _agent_payload(agent)}
         channel_layer = get_channel_layer()
-        target_games = Game.objects.filter(agent=agent, is_active=True).only("id")
+        target_games = Game.objects.filter(agent=agent, is_current=True).only("id")
         for game in target_games:
             try:
                 async_to_sync(channel_layer.group_send)(
@@ -852,7 +1207,7 @@ class PublicGameListView(APIView):
 
     def get(self, request):
         games = Game.objects.filter(
-            status__in=[Game.Status.CREATED, Game.Status.RUNNING, Game.Status.PAUSED],
+            is_current=True,
             website_status=Game.WebsiteStatus.OPEN,
         ).order_by("game_datetime", "id")
         serializer = PublicGameSerializer(games, many=True)
@@ -865,7 +1220,7 @@ class LatestPublicGameView(APIView):
 
     def get(self, request):
         # Backward-compatible alias that now returns the active game.
-        game = Game.objects.filter(is_active=True).first()
+        game = _get_current_game()
         if game is None:
             return Response({"detail": "No active game found."}, status=404)
         serializer = PublicGameSerializer(game)
@@ -877,10 +1232,55 @@ class CurrentPublicGameView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        game = Game.objects.filter(is_active=True).first()
+        game = _get_current_game()
         if game is None:
             return Response({"detail": "No active game found."}, status=404)
         serializer = PublicGameSerializer(game)
+        return Response(serializer.data)
+
+
+class GameMetaView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        game = _get_current_game_queryset().select_related("agent").first()
+        if game is None:
+            return Response({"detail": "No active game found."}, status=404)
+
+        game_settings = GameSettings.objects.order_by("-id").first()
+        agent_name = ""
+        if game.agent is not None:
+            agent_name = str(game.agent.name or "").strip()
+
+        agent_whatsapp = ""
+        if game_settings is not None:
+            agent_whatsapp = _normalize_whatsapp(game_settings.agent_whatsapp_number)
+        if not agent_whatsapp and game.agent is not None:
+            agent_whatsapp = _normalize_whatsapp(game.agent.whatsapp_number)
+
+        # Always prefer the active game's own name.
+        # Use GameSettings only as a fallback when game name is missing.
+        game_name = str(game.name or "").strip()
+        if not game_name and game_settings is not None:
+            configured_name = str(game_settings.game_name or "").strip()
+            if configured_name:
+                game_name = configured_name
+        if not game_name:
+            game_name = "Tambola Game"
+
+        payload = {
+            "game_name": game_name,
+            "ticket_price": int(game.ticket_price),
+            "is_live": game.status == Game.Status.RUNNING,
+            "agent_name": agent_name,
+            "agent_whatsapp": agent_whatsapp,
+            "payment_mode": "Manual via WhatsApp",
+            "how_to_play": DEFAULT_HOW_TO_PLAY,
+            "prize_patterns": _prize_patterns_for_game(game),
+            "prize_pattern_details": _prize_pattern_details_for_game(game),
+        }
+        serializer = GameMetaSerializer(payload)
         return Response(serializer.data)
 
 

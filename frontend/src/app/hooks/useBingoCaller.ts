@@ -9,7 +9,7 @@ import {
   unlockAudioFromUserGesture,
 } from '@/utils/audioEngine'
 import { getBingoCallText } from '@/utils/bingoCalls'
-import { isWinnerSoundFlowActive, speakText, stopSpeaking, type VoiceType } from '@/utils/speakText'
+import { isWinnerSoundFlowActive, queueSpeakText, stopSpeaking, type VoiceType } from '@/utils/speakText'
 import { resolveSpeechConfig } from '@/voices/voiceRegistry'
 
 type BingoCallerState = {
@@ -48,6 +48,7 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
   const status = useGameStore((state) => state.status)
   const calledNumbers = useGameStore((state) => state.calledNumbers)
   const voiceMode = useVoiceModeStore((state) => state.mode)
+  const voiceSpeed = useVoiceModeStore((state) => state.speed)
   const [announcement, setAnnouncement] = useState('')
   const [announcementNumber, setAnnouncementNumber] = useState<number | null>(null)
   const [audioUnlocked, setAudioUnlocked] = useState(isAudioUnlocked())
@@ -90,8 +91,13 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
         return false
       }
 
-      const { speechText } = resolveSpeechConfig(mode, calledNumber, text)
-      const played = await speakText(speechText || text, resolveVoiceTypeForMode(mode))
+      const { speechText, rate, pitch } = resolveSpeechConfig(mode, calledNumber, text)
+      const rateMultiplier =
+        Number.isFinite(voiceSpeed) && voiceSpeed > 0 ? voiceSpeed : 1
+      const played = await queueSpeakText(speechText || text, resolveVoiceTypeForMode(mode), {
+        rate: rate * rateMultiplier,
+        pitch,
+      })
       if (!played) {
         setIsAudioReady(false)
         setAudioBlockedMessage(AUDIO_BLOCKED_TEXT)
@@ -102,7 +108,7 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
       setAudioBlockedMessage(null)
       return true
     },
-    [audioUnlocked],
+    [audioUnlocked, voiceSpeed],
   )
 
   const unlockAudio = useCallback(() => {
@@ -172,7 +178,21 @@ export const useBingoCaller = ({ soundEnabled = true }: UseBingoCallerOptions = 
     } else if (!audioUnlocked) {
       pendingSpeechRef.current = { number: calledNumber, text, voiceMode }
     } else if (isWinnerSoundFlowActive()) {
-      pendingSpeechRef.current = null
+      // If a winner sound flow is active, queue the call so it plays when the
+      // winner flow completes. We attach a one-time listener to resume playback.
+      pendingSpeechRef.current = { number: calledNumber, text, voiceMode }
+      const handler = () => {
+        const pending = pendingSpeechRef.current
+        pendingSpeechRef.current = null
+        if (pending) {
+          void speakAnnouncement(pending.number, pending.text, pending.voiceMode)
+        }
+      }
+      try {
+        window.addEventListener('winner-soundflow-ended', handler, { once: true })
+      } catch {
+        // ignore
+      }
     } else {
       void (async () => {
         const played = await speakAnnouncement(calledNumber, text, voiceMode)

@@ -1,0 +1,68 @@
+.floating-book-btn {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 1200;
+  background: #f21717;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 14px 18px;
+  font-weight: 800;
+  font-size: 16px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.floating-book-btn:active {
+  transform: translateY(1px);
+}
+
+/* Modal overlay */
+.floating-book-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 1300;
+  padding: 20px;
+}
+
+.floating-book-modal__panel {
+  width: 100%;
+  max-width: 480px;
+  max-height: 96vh;
+  overflow: auto;
+  border-radius: 12px;
+  background: transparent; /* SelectTicket has its own background */
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  position: relative;
+}
+
+.floating-book-modal__close {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  border: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+}
+
+
+@media (min-width: 1200px) {
+  .floating-book-btn {
+    right: 32px;
+    bottom: 32px;
+    font-size: 18px;
+    padding: 16px 20px;
+  }
+}

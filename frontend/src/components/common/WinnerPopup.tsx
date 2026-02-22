@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import confetti from 'canvas-confetti'
 import { playAudioElementSafely } from '@/utils/audioEngine'
+import { playWinnerSoundFlow } from '@/utils/soundManager'
 import './WinnerPopup.css'
 
 type WinnerPopupProps = {
@@ -57,6 +58,8 @@ const WinnerPopup = ({ visible, winnerName, prizeType, enableSound = true }: Win
       audioRef.current.pause()
       audioRef.current.currentTime = 0
       void playAudioElementSafely(audioRef.current)
+      const announcement = `${winnerName || 'Player'} has won ${toPrizeLabel(prizeType)}`
+      void playWinnerSoundFlow(announcement)
     }
   }, [enableSound, visible, winnerName, prizeType])
 

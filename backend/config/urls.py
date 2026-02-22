@@ -17,8 +17,14 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+from games.views import AdminRecreateGameView, GameMetaView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/game/meta/', GameMetaView.as_view(), name='game-meta'),
+    path('api/game/meta', GameMetaView.as_view(), name='game-meta-no-slash'),
+    path('api/admin/game/<uuid:game_id>/recreate/', AdminRecreateGameView.as_view(), name='admin-game-recreate'),
+    path('api/admin/game/<uuid:game_id>/recreate', AdminRecreateGameView.as_view(), name='admin-game-recreate-no-slash'),
     path('api/', include('common.urls')),
     path('api/admin/tickets/', include('tickets.admin_urls')),
     path('api/users/', include('users.urls')),

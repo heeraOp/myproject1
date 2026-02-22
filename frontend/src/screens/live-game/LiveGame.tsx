@@ -50,6 +50,12 @@ const PRIZE_LABEL_MAP: Record<string, string> = {
   QUICK_7: 'Quick 7',
 }
 
+type GameRecreatedSocketPayload = {
+  old_game_id?: string
+  new_game_id?: string
+  reason?: string
+}
+
 const dedupeWinners = (winners: Array<PublicWinner>) => {
   const seen = new Set<string>()
   return winners.filter((winner) => {
@@ -137,6 +143,7 @@ const LiveGame = () => {
   const [isNumberUiFrozen, setIsNumberUiFrozen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [gameUpdatedBanner, setGameUpdatedBanner] = useState('')
   const [soundEnabled] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true
     return window.localStorage.getItem('housie_player_sound_enabled') !== '0'
@@ -192,6 +199,12 @@ const LiveGame = () => {
   }, [])
 
   useEffect(() => {
+    if (!gameUpdatedBanner) return
+    const timer = window.setTimeout(() => setGameUpdatedBanner(''), 5000)
+    return () => window.clearTimeout(timer)
+  }, [gameUpdatedBanner])
+
+  useEffect(() => {
     currentNumberRef.current = currentNumber
     calledNumbersRef.current = calledNumbers
   }, [calledNumbers, currentNumber])
@@ -212,9 +225,7 @@ const LiveGame = () => {
     const normalizedPrizeType = prizeType.trim() || 'Prize'
     const prizeLabel = PRIZE_LABEL_MAP[normalizedPrizeType] ?? normalizedPrizeType
     const announcement = `Congratulations ${normalizedWinnerName}! You won ${prizeLabel}.`
-    const soundPromise = soundEnabled
-      ? playWinnerSoundFlow(announcement, 'dramatic').catch(() => undefined)
-      : Promise.resolve()
+    const soundPromise = playWinnerSoundFlow(announcement, 'dramatic').catch(() => undefined)
 
     if (winnerFreezeTimerRef.current) {
       window.clearTimeout(winnerFreezeTimerRef.current)
@@ -242,37 +253,31 @@ const LiveGame = () => {
     })
 
     await soundPromise
-  }, [soundEnabled])
+  }, [])
 
-  useEffect(() => {
-    let mounted = true
-    const hydrateGames = async () => {
-      try {
-        const currentGame = await fetchCurrentPublicGame()
-        if (!mounted) return
-        if (!currentGame) {
-          setGames([])
-          setSelectedGameId('')
-          return
-        }
-        if (currentGame.active_theme) {
-          setAdminTheme(currentGame.active_theme)
-        }
-        setActiveTheme(currentGame.active_theme ?? null)
-        // Public side should only ever see the backend-active game.
-        setGames([currentGame])
-        setSelectedGameId(currentGame.id)
-      } catch {
-        if (!mounted) return
-        setError('Unable to load game list.')
+  const hydrateCurrentGame = useCallback(async () => {
+    try {
+      const currentGame = await fetchCurrentPublicGame()
+      if (!currentGame) {
+        setGames([])
+        setSelectedGameId('')
+        return
       }
-    }
-
-    void hydrateGames()
-    return () => {
-      mounted = false
+      if (currentGame.active_theme) {
+        setAdminTheme(currentGame.active_theme)
+      }
+      setActiveTheme(currentGame.active_theme ?? null)
+      // Public side should only ever see the backend-active game.
+      setGames([currentGame])
+      setSelectedGameId(currentGame.id)
+    } catch {
+      setError('Unable to load game list.')
     }
   }, [setActiveTheme])
+
+  useEffect(() => {
+    void hydrateCurrentGame()
+  }, [hydrateCurrentGame])
 
   const loadGameData = useCallback(async (gameId: string) => {
     const requestId = loadRequestRef.current + 1
@@ -301,9 +306,11 @@ const LiveGame = () => {
       if (currentGameIdRef.current !== gameId) return
       setError('Unable to load live game state.')
     } finally {
-      if (loadRequestRef.current !== requestId) return
-      if (currentGameIdRef.current !== gameId) return
-      setLoading(false)
+      const staleRequest =
+        loadRequestRef.current !== requestId || currentGameIdRef.current !== gameId
+      if (!staleRequest) {
+        setLoading(false)
+      }
     }
   }, [playerPhone, replaceFromBackendState, setTicketsFromBackend])
 
@@ -395,6 +402,14 @@ const LiveGame = () => {
       clearWinnerQueue()
     })
 
+    const unsubGameRecreated = socketManager.subscribe('game_recreated', (event: unknown) => {
+      const payload = (event as { data?: GameRecreatedSocketPayload }).data
+      const nextGameId = typeof payload?.new_game_id === 'string' ? payload.new_game_id : ''
+      if (!nextGameId) return
+      setGameUpdatedBanner('Game has been updated.')
+      void hydrateCurrentGame()
+    })
+
     const unsubTicketsGenerated = socketManager.subscribe('tickets_generated', async (event: unknown) => {
       const payload = (event as { data?: { game_id?: string } }).data
       const eventGameId = typeof payload?.game_id === 'string' ? payload.game_id : ''
@@ -457,11 +472,18 @@ const LiveGame = () => {
 
     return () => {
       unsubNewGame()
+      unsubGameRecreated()
       unsubTicketsGenerated()
       unsubTicketBooked()
       unsubLeaderboardUpdate()
     }
-  }, [clearWinnerQueue, refreshTicketsForGame, setActiveTheme, setTicketsFromBackend])
+  }, [
+    clearWinnerQueue,
+    hydrateCurrentGame,
+    refreshTicketsForGame,
+    setActiveTheme,
+    setTicketsFromBackend,
+  ])
 
   useEffect(() => {
     const activeWinner = winnerQueue[0]
@@ -604,6 +626,7 @@ const LiveGame = () => {
         prizeType={winnerPopup.prizeType}
         enableSound={soundEnabled}
       />
+      {gameUpdatedBanner && <section className="live-message">{gameUpdatedBanner}</section>}
       <section className="live-header-card">
         <div className="live-header-top">
           <h1>{selectedGame?.name || summary?.game.name || 'Live Tambola'}</h1>

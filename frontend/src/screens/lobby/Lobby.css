@@ -252,6 +252,50 @@
   border-color: var(--color-ff2c2c);
 }
 
+/* Lobby info dropdown styles */
+.lobby-info {
+  background: rgba(255, 255, 255, 0.04);
+  border: 2px solid var(--color-ffe700);
+  border-radius: 10px;
+  padding: 8px 12px;
+  color: var(--color-f4f7ff);
+}
+
+.lobby-info__summary {
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 16px;
+  padding: 8px 10px;
+  list-style: none;
+  outline: none;
+}
+
+.lobby-info__summary::-webkit-details-marker { display: none; }
+
+.lobby-info__content {
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(0, 10, 40, 0.4);
+  border-radius: 8px;
+  color: var(--color-f2f4ff);
+}
+
+.lobby-info__content h3 {
+  margin: 6px 0;
+  font-size: 15px;
+  color: var(--color-ffe700);
+}
+
+.lobby-info__content ul {
+  margin: 6px 0 12px 18px;
+  padding: 0;
+  font-size: 14px;
+}
+
+.lobby-info__content li {
+  margin: 4px 0;
+}
+
 @media (max-width: 900px) {
   .check-title {
     font-size: 34px;

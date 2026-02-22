@@ -48,13 +48,18 @@ type AnnouncementEvent = {
   type: 'announcement'
   message: string
   timestamp: string
-  game_id: string
-  announcement_id?: number
+  game_id: string | number
+  announcement_id?: number | string
 }
 
 type VoiceModeUpdateEvent = {
   type: 'VOICE_MODE_UPDATE'
   voice_mode: VoiceMode
+}
+
+type VoiceSpeedUpdateEvent = {
+  type: 'VOICE_SPEED_UPDATE'
+  voice_speed: number
 }
 
 type EngineSocketEvent = GameStartedEvent | NumberCalledEvent | GameFinishedEvent | WinnerAnnouncedEvent
@@ -100,11 +105,12 @@ const isWinnerAnnouncedEvent = (payload: unknown): payload is WinnerAnnouncedEve
 const isAnnouncementEvent = (payload: unknown): payload is AnnouncementEvent => {
   if (!payload || typeof payload !== 'object') return false
   const event = payload as Record<string, unknown>
+  const hasGameId = typeof event.game_id === 'string' || typeof event.game_id === 'number'
   return (
     event.type === 'announcement' &&
     typeof event.message === 'string' &&
     typeof event.timestamp === 'string' &&
-    typeof event.game_id === 'string'
+    hasGameId
   )
 }
 
@@ -138,12 +144,19 @@ const isVoiceModeUpdateEvent = (payload: unknown): payload is VoiceModeUpdateEve
   return event.type === 'VOICE_MODE_UPDATE' && isVoiceMode(event.voice_mode)
 }
 
+const isVoiceSpeedUpdateEvent = (payload: unknown): payload is VoiceSpeedUpdateEvent => {
+  if (!payload || typeof payload !== 'object') return false
+  const event = payload as Record<string, unknown>
+  return event.type === 'VOICE_SPEED_UPDATE' && Number.isFinite(Number(event.voice_speed))
+}
+
 export const useGameSocket = (gameId?: string): void => {
   const applyBackendEvent = useGameStore((state) => state.applyBackendEvent)
   const replaceFromBackendState = useGameStore((state) => state.replaceFromBackendState)
   const enqueueWinnerAnnouncement = useGameStore((state) => state.enqueueWinnerAnnouncement)
   const addAnnouncement = useAnnouncementStore((state) => state.addAnnouncement)
   const setVoiceMode = useVoiceModeStore((state) => state.setMode)
+  const setVoiceSpeed = useVoiceModeStore((state) => state.setSpeed)
   const toInteger = (value: string | number): number | null => {
     if (typeof value === 'number' && Number.isInteger(value)) return value
     const parsed = Number.parseInt(String(value), 10)
@@ -256,12 +269,16 @@ export const useGameSocket = (gameId?: string): void => {
       }),
       socketManager.subscribe('announcement', (event: unknown) => {
         if (!isAnnouncementEvent(event)) return
+        const normalizedGameId = String(event.game_id).trim()
+        if (!normalizedGameId) return
         const rawId = event.announcement_id
+        const parsedId =
+          typeof rawId === 'number' ? rawId : Number.parseInt(String(rawId ?? ''), 10)
         const numericId =
-          typeof rawId === 'number' && Number.isInteger(rawId) ? rawId : Date.now() + Math.random()
+          Number.isInteger(parsedId) ? parsedId : Date.now() + Math.floor(Math.random() * 1000)
         addAnnouncement({
           id: Number(numericId),
-          gameId: event.game_id,
+          gameId: normalizedGameId,
           message: event.message,
           timestamp: event.timestamp,
         })
@@ -269,6 +286,10 @@ export const useGameSocket = (gameId?: string): void => {
       socketManager.subscribe('VOICE_MODE_UPDATE', (event: unknown) => {
         if (!isVoiceModeUpdateEvent(event)) return
         setVoiceMode(event.voice_mode)
+      }),
+      socketManager.subscribe('VOICE_SPEED_UPDATE', (event: unknown) => {
+        if (!isVoiceSpeedUpdateEvent(event)) return
+        setVoiceSpeed(Number(event.voice_speed))
       }),
       socketManager.on('reconnect', () => {
         void recoverState()
@@ -288,5 +309,6 @@ export const useGameSocket = (gameId?: string): void => {
     enqueueWinnerAnnouncement,
     addAnnouncement,
     setVoiceMode,
+    setVoiceSpeed,
   ])
 }

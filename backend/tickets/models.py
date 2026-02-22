@@ -38,3 +38,33 @@ class Ticket(models.Model):
 
     def __str__(self) -> str:
         return f"{self.game_id} - {self.ticket_number}"
+
+
+class Booking(models.Model):
+    class BookingType(models.TextChoices):
+        RANDOM = "random", "Random"
+        HALF_SHEET = "halfsheet", "Half Sheet"
+        FULL_SHEET = "fullsheet", "Full Sheet"
+
+    class PaymentStatus(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        CONFIRMED = "CONFIRMED", "Confirmed"
+        REJECTED = "REJECTED", "Rejected"
+
+    player = models.CharField(max_length=120)
+    booking_type = models.CharField(max_length=20, choices=BookingType.choices)
+    ticket_numbers = models.JSONField(default=list)
+    ticket_count = models.PositiveIntegerField()
+    payment_mode = models.CharField(max_length=120)
+    payment_status = models.CharField(
+        max_length=20,
+        choices=PaymentStatus.choices,
+        default=PaymentStatus.PENDING,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at", "id")
+
+    def __str__(self) -> str:
+        return f"{self.player} - {self.booking_type} ({self.ticket_count})"

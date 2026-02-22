@@ -8,7 +8,7 @@
 .select-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   background: var(--color-1427b5);
   padding: 16px;
   border-radius: 8px;
@@ -19,30 +19,6 @@
   margin: 0;
   font-family: 'Bebas Neue', sans-serif;
   letter-spacing: 2px;
-}
-
-.select-close {
-  font-size: 28px;
-  font-weight: 700;
-}
-
-.select-banner {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--color-0d1aa3);
-  padding: 14px;
-  border-radius: 8px;
-  margin-bottom: 16px;
-}
-
-.banner-button {
-  background: var(--color-ff6a45);
-  color: var(--color-fff);
-  border: none;
-  border-radius: 18px;
-  padding: 8px 16px;
-  font-weight: 700;
 }
 
 .input-row {
@@ -59,13 +35,28 @@
 }
 
 .ticket-types {
+  display: grid;
+  gap: 6px;
   margin-bottom: 12px;
 }
 
-.ticket-types div {
+.ticket-types button {
+  width: 100%;
+  text-align: left;
   border-bottom: 2px solid var(--color-7ea2ff);
   padding: 8px 2px;
   font-weight: 600;
+  background: transparent;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  color: var(--color-fff);
+  cursor: pointer;
+}
+
+.ticket-types button.active {
+  color: #ffe669;
+  border-bottom-color: #ffe669;
 }
 
 .ticket-add {
@@ -114,13 +105,66 @@
   background: var(--color-fff);
   color: var(--color-101010);
   text-align: center;
-  padding: 8px 0;
+  padding: 6px 4px;
   border: 1px solid var(--color-c8c8c8);
+  font-weight: 700;
+  min-height: 62px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.ticket-cell__number {
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.ticket-cell__status {
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   font-weight: 700;
 }
 
-.ticket-cell.available {
+.ticket-cell--available {
   background: var(--color-ffe900);
+}
+
+.ticket-cell.selected {
+  background: #e07b20;
+  color: #fff;
+}
+
+.ticket-cell--booked {
+  background: #2f2f2f;
+  color: #bbb;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.ticket-cell--ended {
+  background: #5d1414;
+  color: #f4d2d2;
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+
+.select-error {
+  color: #ffdddd;
+  background: #8b1515;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin: 8px 0;
+}
+
+.select-success {
+  color: #063;
+  background: #e6ffee;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin: 8px 0;
 }
 
 @media (max-width: 720px) {

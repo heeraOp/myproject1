@@ -23,9 +23,24 @@ class Agent(models.Model):
         return f"{self.name} ({self.whatsapp_number})"
 
 
+class GameSettings(models.Model):
+    game_name = models.CharField(max_length=255)
+    agent_whatsapp_number = models.CharField(max_length=20, validators=[whatsapp_number_validator])
+
+    class Meta:
+        ordering = ("-id",)
+
+    def __str__(self) -> str:
+        return f"{self.game_name} ({self.agent_whatsapp_number})"
+
+
 class Game(models.Model):
     class Status(models.TextChoices):
         CREATED = "CREATED", "Created"
+        ACTIVE = "ACTIVE", "Active"
+        COMPLETED = "COMPLETED", "Completed"
+        CANCELLED = "CANCELLED", "Cancelled"
+        # Legacy statuses retained for backward compatibility with existing flows.
         BOOKING_OPEN = "BOOKING_OPEN", "Booking Open"
         RUNNING = "RUNNING", "Running"
         PAUSED = "PAUSED", "Paused"
@@ -56,14 +71,32 @@ class Game(models.Model):
     website_status = models.CharField(max_length=10, choices=WebsiteStatus.choices, default=WebsiteStatus.OPEN)
     active_theme = models.CharField(max_length=20, choices=Theme.choices, default=Theme.DARK)
     is_active = models.BooleanField(default=False)
+    version = models.PositiveIntegerField(default=1)
+    is_current = models.BooleanField(default=True)
     calling_interval = models.PositiveIntegerField(default=10)
     agent = models.ForeignKey(Agent, null=True, blank=True, on_delete=models.SET_NULL, related_name="games")
+    recreated_from = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="recreated_versions",
+    )
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    recreated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="recreated_games",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     ended_at = models.DateTimeField(null=True, blank=True)
+    recreated_at = models.DateTimeField(null=True, blank=True)
+    reason = models.TextField(null=True, blank=True)
 
     class Meta:
         constraints = [
@@ -71,7 +104,15 @@ class Game(models.Model):
                 fields=["is_active"],
                 condition=models.Q(is_active=True),
                 name="unique_active_game",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["is_current"],
+                condition=models.Q(
+                    is_current=True,
+                    status__in=["CREATED", "ACTIVE"],
+                ),
+                name="unique_current_created_or_active_game",
+            ),
         ]
 
     def __str__(self) -> str:

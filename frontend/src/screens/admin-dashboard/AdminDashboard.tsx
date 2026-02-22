@@ -20,6 +20,7 @@ import {
   getWinners,
   listAdminGames,
   pauseGame,
+  recreateGame,
   resetAgent,
   resetCall,
   resetTicket,
@@ -42,7 +43,12 @@ import {
 import { useGameSocket } from '@/app/hooks/useGameSocket'
 import { useBingoCaller } from '@/app/hooks/useBingoCaller'
 import { useGameStore } from '@/app/store/game.store'
-import { useVoiceModeStore, type VoiceMode, VOICE_MODE_OPTIONS } from '@/app/store/voiceMode.store'
+import {
+  useVoiceModeStore,
+  type VoiceMode,
+  VOICE_MODE_OPTIONS,
+  VOICE_SPEED_OPTIONS,
+} from '@/app/store/voiceMode.store'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
 import { socketManager } from '@/api/websocket/socketManager'
 import { jsPDF } from 'jspdf'
@@ -57,6 +63,7 @@ import {
 import { formatDateTimeInIST, toDateTimeLocalInputInIST } from '@/utils/dateTime'
 import { wallpaperRegistry, resolveWallpaperTheme } from '@/theme/wallpaperRegistry'
 import './AdminDashboard.css'
+import FloatingBookButton from '@/components/admin/FloatingBookButton'
 
 type SettingsForm = {
   gameName: string
@@ -92,6 +99,13 @@ type GameUpdateSocketPayload = {
     status?: string
     calling_interval?: number
   }
+}
+
+type GameRecreatedSocketPayload = {
+  old_game_id?: string
+  new_game_id?: string
+  reason?: string
+  new_game?: AdminGameListItem
 }
 
 type AgentEditorForm = {
@@ -191,6 +205,10 @@ const toDateTimeLocalValue = (value: string | null | undefined): string => {
   return toDateTimeLocalInputInIST(value)
 }
 
+const getCurrentDateTimeLocalValue = (): string => {
+  return toDateTimeLocalInputInIST(new Date().toISOString())
+}
+
 const formatDateTime = (value?: string): string => {
   return formatDateTimeInIST(value)
 }
@@ -233,6 +251,9 @@ const AdminDashboard = () => {
   const [error, setError] = useState<string>('')
   const [publicGamesError, setPublicGamesError] = useState<string>('')
   const [actionMessage, setActionMessage] = useState<string>('')
+  const [showRecreateModal, setShowRecreateModal] = useState(false)
+  const [recreateReason, setRecreateReason] = useState('')
+  const [recreateInProgress, setRecreateInProgress] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
   const [callingInterval, setCallingInterval] = useState<number>(10)
   const [savingSettings, setSavingSettings] = useState(false)
@@ -260,7 +281,7 @@ const AdminDashboard = () => {
 
   const [settingsForm, setSettingsForm] = useState<SettingsForm>({
     gameName: '',
-    gameDateTime: '',
+    gameDateTime: getCurrentDateTimeLocalValue(),
     totalTicketLimit: '',
     ticketPrice: '',
     callingInterval: '10',
@@ -328,6 +349,8 @@ const AdminDashboard = () => {
   } = useBingoCaller({ soundEnabled })
   const voiceMode = useVoiceModeStore((state) => state.mode)
   const setVoiceMode = useVoiceModeStore((state) => state.setMode)
+  const voiceSpeed = useVoiceModeStore((state) => state.speed)
+  const setVoiceSpeed = useVoiceModeStore((state) => state.setSpeed)
   const normalizedPath = location.pathname.replace(/\/+$/, '')
   const activeView: 'main' | 'run' | 'book' | 'list' | 'poster' | 'prizes' = normalizedPath.endsWith(
     '/run',
@@ -544,6 +567,10 @@ const AdminDashboard = () => {
 
         if (isSetupMode) {
           setGameId('')
+          setSettingsForm((state) => ({
+            ...state,
+            gameDateTime: getCurrentDateTimeLocalValue(),
+          }))
           return
         }
 
@@ -719,6 +746,66 @@ const AdminDashboard = () => {
     const unsubGameUpdate = socketManager.subscribe('game_update', handleGameUpdate)
     const unsubGameUpdateUpper = socketManager.subscribe('GAME_UPDATE', handleGameUpdate)
 
+    const handleGameRecreated = (event: unknown) => {
+      const payload = (event as { data?: GameRecreatedSocketPayload }).data
+      if (!payload || typeof payload !== 'object') return
+
+      const oldGameId = typeof payload.old_game_id === 'string' ? payload.old_game_id : ''
+      const newGamePayload =
+        payload.new_game && typeof payload.new_game === 'object' ? payload.new_game : undefined
+      const newGameId =
+        typeof payload.new_game_id === 'string'
+          ? payload.new_game_id
+          : typeof newGamePayload?.id === 'string'
+            ? newGamePayload.id
+            : ''
+
+      if (!newGameId) return
+
+      if (newGamePayload) {
+        setGames((current) => {
+          const next = current.map((game) =>
+            game.id === oldGameId
+              ? {
+                  ...game,
+                  is_active: false,
+                  is_current: false,
+                  status: 'CANCELLED',
+                }
+              : game,
+          )
+          const existingIndex = next.findIndex((game) => game.id === newGameId)
+          if (existingIndex >= 0) {
+            next[existingIndex] = {
+              ...next[existingIndex],
+              ...newGamePayload,
+            }
+            return next
+          }
+          return [newGamePayload, ...next]
+        })
+      }
+
+      setShowRecreateModal(false)
+      setRecreateReason('')
+      setActionMessage(
+        typeof payload.reason === 'string' && payload.reason.trim()
+          ? `Game has been updated. Reason: ${payload.reason.trim()}`
+          : 'Game has been updated.',
+      )
+
+      setSummary(null)
+      setBusiness(null)
+      setPrizes([])
+      setEditablePrizes([])
+      setTickets([])
+      setWinners([])
+      setGameId(newGameId)
+      void loadAll(newGameId)
+    }
+
+    const unsubGameRecreated = socketManager.subscribe('game_recreated', handleGameRecreated)
+
     const unsubGameStarted = socketManager.subscribe('game.started', (event: unknown) => {
       if (!gameId) return
       const payload = event as { calling_interval?: unknown }
@@ -835,12 +922,13 @@ const AdminDashboard = () => {
       unsubNewGame()
       unsubGameUpdate()
       unsubGameUpdateUpper()
+      unsubGameRecreated()
       unsubGameStarted()
       unsubGameFinished()
       unsubTicketsGenerated()
       unsubTicketBooked()
     }
-  }, [gameId, setTicketsFromBackend])
+  }, [gameId, loadAll, setTicketsFromBackend])
 
   const mergedWinners = useMemo(() => {
     const seen = new Set<string>()
@@ -868,6 +956,7 @@ const AdminDashboard = () => {
     }
 
     const pendingWinnerKeys: string[] = []
+    const pendingWinners: Array<Partial<WinnerResponse>> = []
     mergedWinners.forEach((winner) => {
       const winnerKey = winner.id
         ? `id:${winner.id}`
@@ -875,9 +964,25 @@ const AdminDashboard = () => {
       if (winnerPauseProcessedRef.current.has(winnerKey)) return
       winnerPauseProcessedRef.current.add(winnerKey)
       pendingWinnerKeys.push(winnerKey)
+      pendingWinners.push(winner)
     })
 
     if (pendingWinnerKeys.length === 0) return
+
+    // Announce and store each pending winner via admin API (includes optional API key).
+    // Fire-and-forget: failures should not block local UI flow.
+    pendingWinners.forEach((winner) => {
+      try {
+        const name = winner.player_name ?? 'Player'
+        const prize = winner.prize_type
+          ? PRIZE_LABEL_MAP[winner.prize_type] ?? winner.prize_type
+          : 'Prize'
+        const message = `${name} has won ${prize} (Ticket #${winner.ticket_number ?? 'N/A'}).`
+        void announceGame(gameId, message).catch(() => undefined)
+      } catch {
+        // ignore
+      }
+    })
 
     pendingWinnerKeys.forEach(() => {
       const queuedGameId = gameId
@@ -1004,6 +1109,25 @@ const AdminDashboard = () => {
     setBusiness(freshBusiness)
   }, [setTicketsFromBackend])
 
+  // Listen for external booking events from modal and refresh tickets.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      try {
+        const ce = e as CustomEvent<{ gameId?: string; ticket_numbers?: number[] }>
+        if (!ce?.detail) return
+        const eventGameId = ce.detail.gameId
+        if (!eventGameId) return
+        if (!gameId) return
+        if (eventGameId !== gameId) return
+        void refreshTicketsAndBusiness(gameId)
+      } catch {
+        // ignore
+      }
+    }
+    window.addEventListener('admin:ticket:booked', handler as EventListener)
+    return () => window.removeEventListener('admin:ticket:booked', handler as EventListener)
+  }, [gameId, refreshTicketsAndBusiness])
+
   const promptTicketAssignment = (
     defaults: { playerName?: string; playerPhone?: string } = {},
   ): { playerName: string; playerPhone: string } | null => {
@@ -1049,7 +1173,7 @@ const AdminDashboard = () => {
     setTicketManageActionType('book')
     setActionMessage('')
     try {
-      await bookTicketAsAdmin({
+      const bookingResult = await bookTicketAsAdmin({
         game_id: gameId,
         ticket_number: ticket.ticket_number,
         booking_mode: 'RANDOM',
@@ -1058,7 +1182,12 @@ const AdminDashboard = () => {
       })
       await refreshTicketsAndBusiness(gameId)
       setSearchKeyword('')
-      setActionMessage(`Ticket ${ticket.ticket_number} booked for ${assignment.playerName}.`)
+      const privilegeLabel = bookingResult.eligible_privileges.full_sheet_bonus
+        ? 'Full Sheet bonus eligible.'
+        : bookingResult.eligible_privileges.half_sheet_bonus
+          ? 'Half Sheet bonus eligible.'
+          : 'Sheet bonus not enabled.'
+      setActionMessage(`Ticket ${ticket.ticket_number} booked for ${assignment.playerName}. ${privilegeLabel}`)
     } catch (bookError) {
       setActionMessage(getErrorMessage(bookError))
     } finally {
@@ -1680,7 +1809,7 @@ const AdminDashboard = () => {
     setShowTicketCards(false)
     setSettingsForm({
       gameName: '',
-      gameDateTime: '',
+      gameDateTime: getCurrentDateTimeLocalValue(),
       totalTicketLimit: '',
       ticketPrice: '',
       callingInterval: '10',
@@ -1695,6 +1824,72 @@ const AdminDashboard = () => {
   const handleSetNewGame = () => {
     resetLocalAdminState()
     navigate('/admin?setup=1')
+  }
+
+  const handleOpenRecreateModal = () => {
+    if (!gameId || !summary) {
+      setActionMessage('Select a game before recreating.')
+      return
+    }
+    setRecreateReason('')
+    setShowRecreateModal(true)
+  }
+
+  const handleCloseRecreateModal = () => {
+    if (recreateInProgress) return
+    setShowRecreateModal(false)
+  }
+
+  const handleRecreateCurrentGame = async () => {
+    if (!gameId || !summary) return
+
+    const reason = recreateReason.trim()
+    if (!reason) {
+      setActionMessage('Recreate reason is required.')
+      return
+    }
+
+    setRecreateInProgress(true)
+    setActionMessage('')
+    try {
+      const recreated = await recreateGame(gameId, {
+        reason,
+        updated_fields: {
+          ...buildSettingsPayload(),
+        },
+      })
+
+      setGames((current) => {
+        const next = current.map((game) =>
+          game.id === gameId
+            ? {
+                ...game,
+                is_active: false,
+                is_current: false,
+                status: 'CANCELLED',
+              }
+            : game,
+        )
+        const existingIndex = next.findIndex((game) => game.id === recreated.id)
+        if (existingIndex >= 0) {
+          next[existingIndex] = { ...next[existingIndex], ...recreated }
+          return next
+        }
+        return [recreated, ...next]
+      })
+
+      setShowRecreateModal(false)
+      setRecreateReason('')
+      setGameId(recreated.id)
+      await loadAll(recreated.id)
+      setActionMessage(
+        `Game recreated successfully${typeof recreated.version === 'number' ? ` (v${recreated.version})` : ''}.`,
+      )
+    } catch (recreateError) {
+      setActionMessage(getErrorMessage(recreateError))
+    } finally {
+      setRecreateInProgress(false)
+    }
   }
 
   const actionHandlers: Array<{
@@ -1798,6 +1993,16 @@ const AdminDashboard = () => {
       <header className="admin-page__header">
         <h1>{viewTitleMap[activeView]}</h1>
         <div className="admin-page__toolbar">
+          {!isSetupMode && Boolean(gameId) && Boolean(summary) && (
+            <button
+              type="button"
+              className="secondary-btn recreate-btn"
+              onClick={handleOpenRecreateModal}
+              disabled={recreateInProgress}
+            >
+              Recreate Game
+            </button>
+          )}
           {summary?.game.status === 'FINISHED' && !isSetupMode && (
             <button className="secondary-btn" onClick={handleSetNewGame}>
               Set New Game
@@ -1859,6 +2064,9 @@ const AdminDashboard = () => {
           </p>
         </div>
       </section>
+
+      {/* Floating booking button for quick admin booking */}
+      <FloatingBookButton gameId={gameId} />
 
       {loading && <div className="admin-message">Loading...</div>}
       {publicGamesError && <div className="admin-message error">{publicGamesError}</div>}
@@ -2231,6 +2439,27 @@ const AdminDashboard = () => {
                 {VOICE_MODE_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                id="admin-voice-speed"
+                aria-label="Voice speed"
+                value={String(voiceSpeed)}
+                onChange={(event) => {
+                  const nextSpeed = Number.parseFloat(event.target.value)
+                  if (!Number.isFinite(nextSpeed)) return
+                  setVoiceSpeed(nextSpeed)
+                  if (!gameId) return
+                  socketManager.send({
+                    type: 'voice_speed_update',
+                    voice_speed: nextSpeed,
+                  })
+                }}
+              >
+                {VOICE_SPEED_OPTIONS.map((option) => (
+                  <option key={option.value} value={String(option.value)}>
+                    Speed {option.label}
                   </option>
                 ))}
               </select>
@@ -2624,6 +2853,51 @@ const AdminDashboard = () => {
             Print Poster
           </button>
         </section>
+      )}
+
+      {showRecreateModal && (
+        <div className="admin-modal-backdrop" onClick={handleCloseRecreateModal}>
+          <section
+            className="admin-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Recreate game"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3>Recreate Game</h3>
+            <p>
+              This will cancel the current game version and create a corrected new version using
+              your current Game Settings values.
+            </p>
+            <label htmlFor="recreate-reason">Reason</label>
+            <textarea
+              id="recreate-reason"
+              value={recreateReason}
+              onChange={(event) => setRecreateReason(event.target.value)}
+              placeholder="Correction needed"
+              maxLength={1000}
+              disabled={recreateInProgress}
+            />
+            <div className="admin-modal-actions">
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={handleCloseRecreateModal}
+                disabled={recreateInProgress}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={() => void handleRecreateCurrentGame()}
+                disabled={recreateInProgress || !recreateReason.trim()}
+              >
+                {recreateInProgress ? 'Recreating...' : 'Recreate Game'}
+              </button>
+            </div>
+          </section>
+        </div>
       )}
     </main>
   )

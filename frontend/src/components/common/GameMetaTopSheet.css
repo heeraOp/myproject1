@@ -1,0 +1,390 @@
+.game-meta-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  border: 0;
+  background: rgba(4, 8, 26, 0.36);
+  backdrop-filter: blur(3px);
+  cursor: pointer;
+}
+
+.game-meta-top-sheet {
+  position: sticky;
+  top: 8px;
+  margin: 0 auto 10px;
+  width: min(1100px, calc(100vw - 20px));
+  z-index: 40;
+  pointer-events: none;
+}
+
+.game-meta-compact {
+  width: 100%;
+  min-height: 56px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(12, 25, 59, 0.96) 0%, rgba(8, 17, 40, 0.96) 100%);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
+  color: var(--panel-white);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  text-align: left;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.game-meta-compact__left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.game-meta-trophy {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 208, 18, 0.18);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  flex: 0 0 auto;
+}
+
+.game-meta-compact__text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.game-meta-compact__right {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.game-meta-live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(189, 193, 204, 0.95);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
+}
+
+.game-meta-live-dot.is-live {
+  background: #25d366;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.18),
+    0 0 16px rgba(37, 211, 102, 0.65);
+}
+
+.game-meta-info-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: lowercase;
+  transition: transform 300ms ease-in-out;
+}
+
+.game-meta-info-icon.is-open {
+  transform: rotate(180deg);
+}
+
+.game-meta-panel {
+  margin-top: 10px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: linear-gradient(180deg, rgba(10, 16, 35, 0.99) 0%, rgba(7, 13, 30, 0.99) 100%);
+  box-shadow:
+    0 22px 46px rgba(0, 0, 0, 0.48),
+    0 2px 0 rgba(255, 255, 255, 0.05) inset;
+  color: var(--panel-white);
+  pointer-events: none;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-22px);
+  transition:
+    transform 300ms ease-in-out,
+    opacity 240ms ease-in-out,
+    max-height 300ms ease-in-out;
+}
+
+.game-meta-top-sheet.is-open .game-meta-panel {
+  pointer-events: auto;
+  max-height: min(78vh, 760px);
+  opacity: 1;
+  transform: translateY(0);
+  overflow-y: auto;
+}
+
+.game-meta-panel__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(10, 16, 35, 0.95);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.game-meta-panel__header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.game-meta-loading {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 600;
+}
+
+.game-meta-error {
+  margin: 12px 16px 0;
+  border: 1px solid rgba(244, 67, 54, 0.5);
+  border-radius: 10px;
+  background: rgba(244, 67, 54, 0.12);
+  color: #ffd1cd;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.game-meta-section {
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.game-meta-section:last-child {
+  border-bottom: 0;
+  padding-bottom: 18px;
+}
+
+.game-meta-section h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.game-meta-section p {
+  margin: 0 0 7px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.game-meta-section ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.game-meta-section li {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.game-meta-note {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.game-meta-prize-list {
+  list-style: none;
+  padding-left: 0;
+  gap: 10px;
+}
+
+.game-meta-prize-list li {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.game-meta-prize-list li strong {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.game-meta-prize-list li span {
+  font-size: 13px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.game-meta-agent {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.game-meta-agent strong {
+  display: block;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.game-meta-agent a,
+.game-meta-agent small {
+  display: block;
+}
+
+.game-meta-agent a {
+  color: #8ff6c8;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+
+.game-meta-agent a.is-disabled {
+  color: rgba(255, 255, 255, 0.65);
+  pointer-events: none;
+}
+
+.game-meta-agent small {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+}
+
+.game-meta-whatsapp-btn {
+  border: 0;
+  border-radius: 999px;
+  background: #25d366;
+  color: #10281a;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 9px 14px;
+  text-decoration: none;
+  box-shadow: 0 10px 24px rgba(37, 211, 102, 0.38);
+  white-space: nowrap;
+}
+
+.game-meta-whatsapp-btn.is-disabled {
+  background: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.75);
+  box-shadow: none;
+}
+
+:root[data-theme='light'] .game-meta-compact {
+  background: linear-gradient(135deg, rgba(247, 250, 255, 0.98) 0%, rgba(229, 241, 255, 0.98) 100%);
+  color: #1d2a42;
+  border-color: rgba(23, 45, 76, 0.2);
+}
+
+:root[data-theme='light'] .game-meta-info-icon {
+  border-color: rgba(29, 42, 66, 0.36);
+  background: rgba(29, 42, 66, 0.08);
+}
+
+:root[data-theme='light'] .game-meta-panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(241, 248, 255, 0.99) 100%);
+  color: #1d2a42;
+  border-color: rgba(31, 57, 93, 0.2);
+}
+
+:root[data-theme='light'] .game-meta-panel__header {
+  background: rgba(255, 255, 255, 0.96);
+  border-bottom-color: rgba(31, 57, 93, 0.12);
+}
+
+:root[data-theme='light'] .game-meta-loading,
+:root[data-theme='light'] .game-meta-section p,
+:root[data-theme='light'] .game-meta-section li,
+:root[data-theme='light'] .game-meta-note,
+:root[data-theme='light'] .game-meta-prize-list li span,
+:root[data-theme='light'] .game-meta-agent small,
+:root[data-theme='light'] .game-meta-agent a.is-disabled {
+  color: rgba(29, 42, 66, 0.86);
+}
+
+:root[data-theme='light'] .game-meta-prize-list li {
+  border-color: rgba(31, 57, 93, 0.16);
+  background: rgba(236, 245, 255, 0.62);
+}
+
+:root[data-theme='light'] .game-meta-section {
+  border-bottom-color: rgba(31, 57, 93, 0.1);
+}
+
+:root[data-theme='light'] .game-meta-agent {
+  border-color: rgba(31, 57, 93, 0.2);
+  background: rgba(236, 245, 255, 0.7);
+}
+
+@media (max-width: 720px) {
+  .game-meta-top-sheet {
+    top: 6px;
+    width: calc(100vw - 20px);
+  }
+
+  .game-meta-compact {
+    min-height: 52px;
+    border-radius: 14px;
+    padding: 9px 10px;
+  }
+
+  .game-meta-compact__text {
+    font-size: 12px;
+  }
+
+  .game-meta-info-icon {
+    width: 26px;
+    height: 26px;
+    font-size: 14px;
+  }
+
+  .game-meta-panel {
+    border-radius: 18px;
+    margin-top: 8px;
+  }
+
+  .game-meta-section {
+    padding: 14px 12px;
+  }
+
+  .game-meta-agent {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .game-meta-whatsapp-btn {
+    width: 100%;
+    text-align: center;
+  }
+}

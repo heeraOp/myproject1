@@ -13,6 +13,10 @@ VOICE_MODE_VALUES = {
     "FUNNY_CRAZY",
 }
 
+VOICE_SPEED_MIN = 0.8
+VOICE_SPEED_MAX = 1.5
+VOICE_SPEED_DEFAULT = 1.0
+
 
 class GameConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -42,10 +46,6 @@ class GameConsumer(AsyncWebsocketConsumer):
         if not isinstance(payload, dict):
             return
 
-        message_type = str(payload.get("type", "")).strip().lower()
-        if message_type != "voice_mode_update":
-            return
-
         user = self.scope.get("user")
         is_admin = bool(
             user
@@ -59,17 +59,40 @@ class GameConsumer(AsyncWebsocketConsumer):
         if not is_admin:
             return
 
-        voice_mode = str(payload.get("voice_mode", "")).strip().upper()
-        if voice_mode not in VOICE_MODE_VALUES:
+        message_type = str(payload.get("type", "")).strip().lower()
+        if message_type == "voice_mode_update":
+            voice_mode = str(payload.get("voice_mode", "")).strip().upper()
+            if voice_mode not in VOICE_MODE_VALUES:
+                return
+
+            await self.channel_layer.group_send(
+                self.group_name,
+                {
+                    "type": "voice_mode_update",
+                    "voice_mode": voice_mode,
+                },
+            )
             return
 
-        await self.channel_layer.group_send(
-            self.group_name,
-            {
-                "type": "voice_mode_update",
-                "voice_mode": voice_mode,
-            },
-        )
+        if message_type == "voice_speed_update":
+            try:
+                voice_speed = float(payload.get("voice_speed", VOICE_SPEED_DEFAULT))
+            except (TypeError, ValueError):
+                return
+
+            if not (VOICE_SPEED_MIN <= voice_speed <= VOICE_SPEED_MAX):
+                return
+
+            await self.channel_layer.group_send(
+                self.group_name,
+                {
+                    "type": "voice_speed_update",
+                    "voice_speed": round(voice_speed, 2),
+                },
+            )
+            return
+
+        return
 
     async def number_called(self, event):
         await self.send(
@@ -144,6 +167,17 @@ class GameConsumer(AsyncWebsocketConsumer):
             )
         )
 
+    async def booking_update(self, event):
+        payload = event.get("data", {})
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "booking_update",
+                    "data": payload,
+                }
+            )
+        )
+
     async def tickets_generated(self, event):
         print("Consumer received tickets_generated event:", event)
         payload = event.get("data", {})
@@ -182,6 +216,17 @@ class GameConsumer(AsyncWebsocketConsumer):
             )
         )
 
+    async def game_recreated(self, event):
+        payload = event.get("data", {})
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "game_recreated",
+                    "data": payload,
+                }
+            )
+        )
+
     async def leaderboard_update(self, event):
         payload = event.get("data", [])
         await self.send(
@@ -210,6 +255,16 @@ class GameConsumer(AsyncWebsocketConsumer):
                 {
                     "type": "VOICE_MODE_UPDATE",
                     "voice_mode": event.get("voice_mode", ""),
+                }
+            )
+        )
+
+    async def voice_speed_update(self, event):
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "VOICE_SPEED_UPDATE",
+                    "voice_speed": event.get("voice_speed", VOICE_SPEED_DEFAULT),
                 }
             )
         )

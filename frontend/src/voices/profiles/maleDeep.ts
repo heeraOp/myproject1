@@ -6,7 +6,7 @@ export const maleDeepVoiceProfile: VoiceProfile = {
     /(david|daniel|alex|fred|google uk english male|microsoft david|microsoft mark|male)/i,
   resolveSpeechText: (_number, baseText) => baseText,
   resolveStyle: () => ({
-    rate: 0.86,
+    rate: 0.96,
     pitch: 0.72,
   }),
 }

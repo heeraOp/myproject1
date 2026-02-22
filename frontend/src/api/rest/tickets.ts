@@ -61,6 +61,15 @@ export const fetchGameTickets = async (
 export type RequestBookingPayload = {
   player_name: string
   whatsapp: string
+  payment_mode: string
+}
+
+export type BookingType = 'random' | 'halfsheet' | 'fullsheet'
+
+export type BookingPrivileges = {
+  normal_prizes: boolean
+  half_sheet_bonus: boolean
+  full_sheet_bonus: boolean
 }
 
 export type RequestBookingResponse = {
@@ -75,6 +84,16 @@ export type RequestBookingResponse = {
   requested_by_name: string | null
   requested_by_whatsapp: string | null
   requested_at: string | null
+  booking_type?: BookingType
+  booking_id?: number
+  ticket_count?: number
+  requested_ticket_count?: number
+  ticket_numbers?: number[]
+  eligible_privileges?: BookingPrivileges
+  payment_status?: string
+  whatsapp_redirect_url?: string
+  wallet_deducted?: boolean
+  wallet_amount?: number
 }
 
 export const requestTicketBooking = async (
@@ -83,6 +102,41 @@ export const requestTicketBooking = async (
 ): Promise<RequestBookingResponse> => {
   const response = await apiClient.post<RequestBookingResponse>(
     `/tickets/${ticketId}/request-booking/`,
+    payload,
+  )
+  return response.data
+}
+
+export type BulkRequestBookingPayload = {
+  game_id: string
+  ticket_number?: number
+  ticket_numbers?: number[]
+  ticket_numbers_csv?: string
+  booking_type?: BookingType
+  player_name: string
+  whatsapp: string
+  payment_mode: string
+}
+
+export type BulkRequestBookingResponse = {
+  booking_type: BookingType
+  booking_id?: number
+  ticket_count: number
+  requested_ticket_count?: number
+  ticket_numbers: number[]
+  eligible_privileges: BookingPrivileges
+  payment_status?: string
+  whatsapp_redirect_url?: string
+  wallet_deducted?: boolean
+  wallet_amount?: number
+  requested_tickets?: RequestBookingResponse[]
+}
+
+export const requestBulkTicketBooking = async (
+  payload: BulkRequestBookingPayload,
+): Promise<BulkRequestBookingResponse> => {
+  const response = await apiClient.post<BulkRequestBookingResponse>(
+    '/tickets/request-booking/',
     payload,
   )
   return response.data

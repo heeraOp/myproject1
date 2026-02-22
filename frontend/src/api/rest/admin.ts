@@ -14,6 +14,11 @@ export type AdminGameListItem = {
   name: string
   date: string
   status: string
+  version?: number
+  is_current?: boolean
+  recreated_from?: string | null
+  recreated_at?: string | null
+  reason?: string | null
   calling_interval?: number
   booking_status: string
   website_status: string
@@ -148,6 +153,27 @@ export type GameTicketsSnapshotResponse = {
   final_immutable: boolean
   called_numbers: number[]
   tickets: TicketResponse[]
+}
+
+export type BookingType = 'random' | 'halfsheet' | 'fullsheet'
+
+export type BookingPrivileges = {
+  normal_prizes: boolean
+  half_sheet_bonus: boolean
+  full_sheet_bonus: boolean
+}
+
+export type TicketBookingResponse = Partial<TicketResponse> & {
+  booking_type: BookingType
+  ticket_count: number
+  requested_ticket_count?: number
+  eligible_privileges: BookingPrivileges
+  ticket_numbers: number[]
+  booked_tickets?: Array<Partial<TicketResponse>>
+  requested_tickets?: Array<Partial<TicketResponse>>
+  total_booked?: number
+  wallet_deducted?: boolean
+  wallet_amount?: number
 }
 
 export const getGameSummary = async (gameId: string): Promise<GameSummaryResponse> => {
@@ -321,11 +347,12 @@ export const bookTicketAsAdmin = async (payload: {
   game_id: string
   ticket_number?: number
   ticket_numbers?: number[]
+  ticket_numbers_csv?: string
   booking_mode?: 'RANDOM' | 'HALF_SHEET' | 'FULL_SHEET'
   player_name: string
   player_phone: string
-}): Promise<TicketResponse> => {
-  const response = await adminApiClient.post<TicketResponse>('/tickets/admin/book/', payload)
+}): Promise<TicketBookingResponse> => {
+  const response = await adminApiClient.post<TicketBookingResponse>('/tickets/admin/book/', payload)
   return response.data
 }
 
@@ -371,6 +398,33 @@ export const saveGameSettings = async (payload: {
     ...payload,
     date: dateIso,
   })
+  return response.data
+}
+
+export const recreateGame = async (
+  gameId: string,
+  payload: {
+    reason: string
+    updated_fields?: Record<string, unknown>
+  },
+): Promise<AdminGameListItem> => {
+  const normalizedUpdatedFields: Record<string, unknown> = {
+    ...(payload.updated_fields ?? {}),
+  }
+  if (typeof normalizedUpdatedFields.date === 'string') {
+    const dateIso = toISOStringFromInput(normalizedUpdatedFields.date)
+    if (!dateIso) {
+      throw new Error('Please select a valid game date and time.')
+    }
+    normalizedUpdatedFields.date = dateIso
+  }
+  const response = await adminApiClient.post<AdminGameListItem>(
+    `/admin/game/${gameId}/recreate/`,
+    {
+      ...payload,
+      updated_fields: normalizedUpdatedFields,
+    },
+  )
   return response.data
 }
 
@@ -424,9 +478,16 @@ export const announceGame = async (
   message: string,
 ): Promise<AnnouncementResponse> => {
   const normalizedGameId = normalizeGameId(gameId)
+  // Optionally include an API key from env to authenticate announcement requests.
+  const apiKey = (import.meta.env.VITE_ANNOUNCE_API_KEY as string) || ''
+  const config = apiKey
+    ? { headers: { 'X-API-KEY': apiKey } }
+    : undefined
+
   const response = await adminApiClient.post<AnnouncementResponse>(
     `/games/${normalizedGameId}/announce/`,
     { message },
+    config,
   )
   return response.data
 }

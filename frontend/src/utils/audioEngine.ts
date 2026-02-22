@@ -3,6 +3,8 @@ type WebkitAudioWindow = Window &
     webkitAudioContext?: typeof AudioContext
   }
 
+import { AudioManager } from './audioManager'
+
 type AudioUnlockListener = (unlocked: boolean) => void
 type QueuedAudioPlay = {
   audio: HTMLAudioElement
@@ -73,6 +75,7 @@ const getAudioContextConstructor = (): typeof AudioContext | null => {
   return typedWindow.AudioContext ?? typedWindow.webkitAudioContext ?? null
 }
 
+
 export const isAudioUnlocked = (): boolean => globalAudioUnlocked
 
 export const subscribeAudioUnlock = (listener: AudioUnlockListener): (() => void) => {
@@ -135,7 +138,21 @@ export const resumeGlobalAudioContext = async (): Promise<boolean> => {
 }
 
 export const unlockAudioFromUserGesture = async (): Promise<boolean> => {
-  const contextResumed = await resumeGlobalAudioContext()
+  let contextResumed = false
+  try {
+    contextResumed = await resumeGlobalAudioContext()
+  } catch {
+    contextResumed = false
+  }
+
+  const managerUnlocked = await AudioManager.unlockAudio().catch(() => false)
+
+  const unlocked = contextResumed || managerUnlocked || AudioManager.isUnlocked()
+  if (unlocked) {
+    setGlobalAudioUnlocked(true)
+    detachUnlockListeners()
+  }
+
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
     try {
       window.speechSynthesis.resume()
@@ -144,7 +161,7 @@ export const unlockAudioFromUserGesture = async (): Promise<boolean> => {
       // Ignore speech engine probe failures.
     }
   }
-  return contextResumed
+  return unlocked
 }
 
 const handleGestureUnlock = () => {
@@ -153,28 +170,49 @@ const handleGestureUnlock = () => {
 
 export const initGlobalAudioUnlock = (): void => {
   if (typeof window === 'undefined') return
+  if (AudioManager.isUnlocked()) {
+    setGlobalAudioUnlocked(true)
+    detachUnlockListeners()
+    return
+  }
   if (listenersAttached || globalAudioUnlocked) return
   listenersAttached = true
+  // keep existing handler for AudioContext-based unlocking
   GESTURE_EVENTS.forEach((eventName) => {
     window.addEventListener(eventName, handleGestureUnlock)
   })
-  void unlockAudioFromUserGesture()
+  // also attach AudioManager gesture listeners and hint
+  try {
+    AudioManager.attachGestureListeners()
+  } catch {
+    /* ignore */
+  }
+  // Do not attempt an immediate resume here — creating/resuming an
+  // AudioContext must occur after a user gesture to avoid browser
+  // autoplay warnings. The gesture listeners added above will call
+  // `unlockAudioFromUserGesture` when the user interacts.
 }
 
 export const playAudioElementSafely = async (audio: HTMLAudioElement): Promise<boolean> => {
-  if (!globalAudioUnlocked) {
+  // Prefer centralized AudioManager for consistent playback behavior
+  try {
+    // ensure audio context resumed
     void resumeGlobalAudioContext()
-    return queueAudioPlayback(audio)
+    const played = await AudioManager.playElement(audio)
+    if (played) {
+      setGlobalAudioUnlocked(true)
+    }
+    return played
+  } catch {
+    // fallback to legacy queue if AudioManager fails
+    if (!globalAudioUnlocked) {
+      void resumeGlobalAudioContext()
+      return queueAudioPlayback(audio)
+    }
+    const played = await playAudioNow(audio)
+    if (!played && !globalAudioUnlocked) {
+      return queueAudioPlayback(audio)
+    }
+    return played
   }
-
-  const resumed = await resumeGlobalAudioContext()
-  if (!resumed || !globalAudioUnlocked) {
-    return queueAudioPlayback(audio)
-  }
-
-  const played = await playAudioNow(audio)
-  if (!played && !globalAudioUnlocked) {
-    return queueAudioPlayback(audio)
-  }
-  return played
 }

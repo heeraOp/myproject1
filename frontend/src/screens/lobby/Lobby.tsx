@@ -1,22 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TambolaTicketCard from '@/components/common/TambolaTicketCard'
+import AnnouncementBanner from '@/components/common/AnnouncementBanner'
+import GameMetaTopSheet from '@/components/common/GameMetaTopSheet'
 import { fetchCurrentPublicGame, fetchPublicSupportSettings } from '@/api/rest/games'
 import {
   fetchGameBusinessSummary,
   fetchGameState,
   type PublicGameBusinessSummary,
 } from '@/api/rest/gamePublic'
-import { fetchGameTickets, requestTicketBooking } from '@/api/rest/tickets'
+import { fetchGameTickets, requestBulkTicketBooking } from '@/api/rest/tickets'
 import { socketManager } from '@/api/websocket/socketManager'
 import { useGameSocket } from '@/app/hooks/useGameSocket'
 import { useGameStore } from '@/app/store/game.store'
 import type { PublicGame } from '@/types/backend/game'
 import { normalizeTicketStatus, type PlayerTicket } from '@/types/backend/ticket'
 import { initGlobalAudioUnlock, unlockAudioFromUserGesture } from '@/utils/audioEngine'
+import { playWinnerSoundFlow } from '@/utils/soundManager'
 import { setAdminTheme } from '@/utils/theme'
 import { formatDateInIST, formatTimeInIST } from '@/utils/dateTime'
-import { playMusic, speakText, stopMusic } from '@/utils/speakText'
+import { playMusic, queueSpeakText, stopMusic } from '@/utils/speakText'
 import playerLobbyBanner from '@/assets/player-lobby-banner.svg'
 import './Lobby.css'
 
@@ -26,6 +29,12 @@ const formatDate = (dateValue: string): string => formatDateInIST(dateValue)
 type SupportContact = {
   name: string
   whatsapp_number: string
+}
+
+type GameRecreatedSocketPayload = {
+  old_game_id?: string
+  new_game_id?: string
+  reason?: string
 }
 
 const normalizeWhatsAppNumber = (value: string): string => value.replace(/\D/g, '')
@@ -66,14 +75,33 @@ const toLobbyGameStatus = (status: string | undefined): PublicGame['status'] => 
   return 'CREATED'
 }
 
+const findFirstErrorMessage = (value: unknown): string | null => {
+  if (typeof value === 'string') {
+    const text = value.trim()
+    return text.length > 0 ? text : null
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findFirstErrorMessage(item)
+      if (nested) return nested
+    }
+    return null
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    for (const key of Object.keys(record)) {
+      const nested = findFirstErrorMessage(record[key])
+      if (nested) return nested
+    }
+  }
+  return null
+}
+
 const readErrorDetail = (error: unknown, fallback: string): string => {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'response' in error &&
-    typeof (error as { response?: { data?: { detail?: unknown } } }).response?.data?.detail === 'string'
-  ) {
-    return String((error as { response?: { data?: { detail?: string } } }).response?.data?.detail)
+  if (typeof error === 'object' && error !== null && 'response' in error) {
+    const data = (error as { response?: { data?: unknown } }).response?.data
+    const message = findFirstErrorMessage(data)
+    if (message) return message
   }
   return fallback
 }
@@ -90,12 +118,14 @@ const Lobby = () => {
   const [error, setError] = useState<string | null>(null)
   const [supportNotice, setSupportNotice] = useState('')
   const [bookingNotice, setBookingNotice] = useState('')
+  const [gameUpdatedBanner, setGameUpdatedBanner] = useState('')
   const [fallbackSupport, setFallbackSupport] = useState<SupportContact | null>(null)
   const [now, setNow] = useState(Date.now())
   const [showBookingDashboard, setShowBookingDashboard] = useState(false)
   const [selectedTicketNumbers, setSelectedTicketNumbers] = useState<number[]>([])
   const [bookingPlayerName, setBookingPlayerName] = useState('')
   const [bookingPlayerPhone, setBookingPlayerPhone] = useState(playerPhone ?? '')
+  const [bookingPaymentMode, setBookingPaymentMode] = useState('Cheque')
   const [bookingInProgress, setBookingInProgress] = useState(false)
   const [requestingTicketNumber, setRequestingTicketNumber] = useState<number | null>(null)
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
@@ -127,6 +157,12 @@ const Lobby = () => {
     if (typeof window === 'undefined') return
     window.localStorage.setItem('housie_player_sound_enabled', soundEnabled ? '1' : '0')
   }, [soundEnabled])
+
+  useEffect(() => {
+    if (!gameUpdatedBanner) return
+    const timer = window.setTimeout(() => setGameUpdatedBanner(''), 5000)
+    return () => window.clearTimeout(timer)
+  }, [gameUpdatedBanner])
 
   useEffect(() => {
     initGlobalAudioUnlock()
@@ -166,44 +202,52 @@ const Lobby = () => {
 
   useGameSocket(selectedGame?.id || undefined)
 
+  const queuedWinner = useGameStore((state) => state.winnerQueue[0] ?? null)
+  const processedWinnerRef = useRef<string | null>(null)
+
   useEffect(() => {
-    let mounted = true
-    const hydrateLobby = async () => {
-      try {
-        setLoading(true)
-        setError(null)
-        const currentGame = await fetchCurrentPublicGame()
-        if (!mounted) return
+    if (!queuedWinner) return
+    const key = String(queuedWinner.id)
+    if (processedWinnerRef.current === key) return
+    processedWinnerRef.current = key
+    const name = queuedWinner.winner_name ?? 'Player'
+    const prize = queuedWinner.prize_name ?? 'Prize'
+    const announcement = `Congratulations ${name}! You won ${prize}.`
+    void playWinnerSoundFlow(announcement).catch(() => undefined)
+  }, [queuedWinner])
 
-        if (!currentGame) {
-          setSelectedGame(null)
-          setTickets([])
-          setBusinessSummary(null)
-          setLoading(false)
-          return
-        }
+  const hydrateLobbyGame = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const currentGame = await fetchCurrentPublicGame()
 
-        if (currentGame.active_theme) {
-          setAdminTheme(currentGame.active_theme)
-        }
-        setActiveTheme(currentGame.active_theme ?? null)
-
-        setSelectedGame({
-          ...currentGame,
-          status: toLobbyGameStatus(currentGame.status),
-        })
-      } catch {
-        if (!mounted) return
-        setError('Unable to load lobby data.')
+      if (!currentGame) {
+        setSelectedGame(null)
+        setTickets([])
+        setBusinessSummary(null)
         setLoading(false)
+        return
       }
-    }
 
-    void hydrateLobby()
-    return () => {
-      mounted = false
+      if (currentGame.active_theme) {
+        setAdminTheme(currentGame.active_theme)
+      }
+      setActiveTheme(currentGame.active_theme ?? null)
+
+      setSelectedGame({
+        ...currentGame,
+        status: toLobbyGameStatus(currentGame.status),
+      })
+    } catch {
+      setError('Unable to load lobby data.')
+      setLoading(false)
     }
   }, [setActiveTheme])
+
+  useEffect(() => {
+    void hydrateLobbyGame()
+  }, [hydrateLobbyGame])
 
   const fetchTicketsForGame = useCallback(
     async (targetGameId: string) => {
@@ -342,6 +386,18 @@ const Lobby = () => {
       setTicketsFromBackend(nextGameId, [])
     })
 
+    const unsubGameRecreated = socketManager.subscribe('game_recreated', (event: unknown) => {
+      const payload = (event as { data?: GameRecreatedSocketPayload }).data
+      const nextGameId = typeof payload?.new_game_id === 'string' ? payload.new_game_id : ''
+      if (!nextGameId) return
+
+      setGameUpdatedBanner('Game has been updated.')
+      setShowBookingDashboard(false)
+      setSelectedTicketNumbers([])
+      hasAutoEnteredLiveRef.current = false
+      void hydrateLobbyGame()
+    })
+
     const unsubGameStarted = socketManager.subscribe('game.started', () => {
       setSelectedGame((previous) => {
         if (!previous) return previous
@@ -454,6 +510,7 @@ const Lobby = () => {
 
     return () => {
       unsubNewGame()
+      unsubGameRecreated()
       unsubGameStarted()
       unsubTicketsGenerated()
       unsubGameUpdate()
@@ -461,7 +518,13 @@ const Lobby = () => {
       unsubTicketBooked()
       unsubGameFinished()
     }
-  }, [fetchBusinessSummaryForGame, fetchTicketsForGame, setActiveTheme, setTicketsFromBackend])
+  }, [
+    fetchBusinessSummaryForGame,
+    fetchTicketsForGame,
+    hydrateLobbyGame,
+    setActiveTheme,
+    setTicketsFromBackend,
+  ])
 
   useEffect(() => {
     if (!selectedGame?.id || storeGameId !== selectedGame.id) return
@@ -566,7 +629,7 @@ const Lobby = () => {
     preGameLastAttemptAtRef.current = now
 
     void (async () => {
-      const played = await speakText(nextAnnouncement.message, 'dramatic')
+      const played = await queueSpeakText(nextAnnouncement.message, 'dramatic')
       if (!played) return
       preGameAnnouncementLogRef.current.add(`${gameKey}:${nextAnnouncement.id}`)
     })()
@@ -693,39 +756,43 @@ const Lobby = () => {
       return
     }
 
+    let paymentModeValue = bookingPaymentMode.trim()
+    if (!paymentModeValue) {
+      const paymentInput = window.prompt('Enter payment mode (e.g., Cheque)', 'Cheque')
+      if (paymentInput === null) return
+      paymentModeValue = paymentInput.trim()
+    }
+
+    if (!paymentModeValue) {
+      setBookingNotice('Enter payment mode to continue.')
+      return
+    }
+
     setBookingPlayerName(playerNameValue)
     setBookingPlayerPhone(playerPhoneValue)
+    setBookingPaymentMode(paymentModeValue)
     setBookingInProgress(true)
     setBookingNotice('')
 
     try {
-      const selectedTicketIds = selectedTickets
-        .map((ticket) => ticket.id)
-        .filter((ticketId): ticketId is string => typeof ticketId === 'string' && ticketId.length > 0)
+      const bookingType =
+        sortedTicketNumbers.length === 6
+          ? 'fullsheet'
+          : sortedTicketNumbers.length === 3
+            ? 'halfsheet'
+            : 'random'
+      const bookingResult = await requestBulkTicketBooking({
+        game_id: selectedGame.id,
+        ticket_numbers: sortedTicketNumbers,
+        booking_type: bookingType,
+        player_name: playerNameValue,
+        whatsapp: playerPhoneValue,
+        payment_mode: paymentModeValue,
+      })
 
-      if (selectedTicketIds.length !== selectedTickets.length) {
-        setBookingNotice('Unable to request selected tickets right now. Please refresh and try again.')
-        return
-      }
-
-      let successCount = 0
-      let firstFailureMessage = ''
-      for (const ticketId of selectedTicketIds) {
-        try {
-          await requestTicketBooking(ticketId, {
-            player_name: playerNameValue,
-            whatsapp: playerPhoneValue,
-          })
-          successCount += 1
-        } catch (errorValue) {
-          if (!firstFailureMessage) {
-            firstFailureMessage = readErrorDetail(errorValue, 'Some tickets could not be requested.')
-          }
-        }
-      }
-
-      if (successCount === 0) {
-        setBookingNotice(firstFailureMessage || 'Unable to request booking right now.')
+      const redirectUrl = String(bookingResult.whatsapp_redirect_url ?? '').trim()
+      if (redirectUrl) {
+        window.location.href = redirectUrl
         return
       }
 
@@ -735,14 +802,13 @@ const Lobby = () => {
       ])
       setSelectedTicketNumbers([])
 
-      const seatLabel = selectedBookingMode === 'HALF_SHEET' ? ' (Halfsheet)' : selectedBookingMode === 'FULL_SHEET' ? ' (Fullsheet)' : ''
-      if (successCount < selectedTicketIds.length) {
-        setBookingNotice(
-          `Booking request sent for ${successCount} of ${selectedTicketIds.length} tickets${seatLabel}. ${firstFailureMessage}`,
-        )
-      } else {
-        setBookingNotice(`Booking request sent for ${selectedTicketIds.length} tickets${seatLabel}.`)
-      }
+      const requestedCount = bookingResult.requested_ticket_count ?? sortedTicketNumbers.length
+      const privilegeLabel = bookingResult.eligible_privileges.full_sheet_bonus
+        ? 'Full Sheet bonus eligible.'
+        : bookingResult.eligible_privileges.half_sheet_bonus
+          ? 'Half Sheet bonus eligible.'
+          : 'Sheet bonus not enabled yet.'
+      setBookingNotice(`Booking request sent for ${requestedCount} tickets. ${privilegeLabel}`)
     } catch (errorValue) {
       setBookingNotice(readErrorDetail(errorValue, 'Unable to request booking right now.'))
     } finally {
@@ -785,25 +851,49 @@ const Lobby = () => {
       return
     }
 
-    if (!ticket.id) {
-      setBookingNotice('Unable to request this ticket right now. Please refresh and try again.')
+    let paymentModeValue = bookingPaymentMode.trim()
+    if (!paymentModeValue) {
+      const paymentInput = window.prompt('Enter payment mode (e.g., Cheque)', 'Cheque')
+      if (paymentInput === null) return
+      paymentModeValue = paymentInput.trim()
+    }
+
+    if (!paymentModeValue) {
+      setBookingNotice('Enter payment mode to continue.')
       return
     }
 
     setBookingPlayerName(playerNameValue)
     setBookingPlayerPhone(playerPhoneValue)
+    setBookingPaymentMode(paymentModeValue)
     setRequestingTicketNumber(ticket.ticket_number)
     setBookingNotice('')
     try {
-      await requestTicketBooking(ticket.id, {
+      const bookingResult = await requestBulkTicketBooking({
+        game_id: selectedGame.id,
+        ticket_number: ticket.ticket_number,
+        booking_type: 'random',
         player_name: playerNameValue,
         whatsapp: playerPhoneValue,
+        payment_mode: paymentModeValue,
       })
+
+      const redirectUrl = String(bookingResult.whatsapp_redirect_url ?? '').trim()
+      if (redirectUrl) {
+        window.location.href = redirectUrl
+        return
+      }
+
       await Promise.all([
         fetchTicketsForGame(selectedGame.id),
         fetchBusinessSummaryForGame(selectedGame.id),
       ])
-      setBookingNotice(`Booking request sent for ticket ${ticket.ticket_number}.`)
+      const privilegeLabel = bookingResult.eligible_privileges.full_sheet_bonus
+        ? 'Full Sheet bonus eligible.'
+        : bookingResult.eligible_privileges.half_sheet_bonus
+          ? 'Half Sheet bonus eligible.'
+          : 'Sheet bonus not enabled yet.'
+      setBookingNotice(`Booking request sent for ticket ${ticket.ticket_number}. ${privilegeLabel}`)
     } catch (errorValue) {
       setBookingNotice(readErrorDetail(errorValue, 'Unable to request booking right now.'))
     } finally {
@@ -819,9 +909,42 @@ const Lobby = () => {
         background: '#e8c7c7',
         padding: '10px 10px 24px',
         display: 'flex',
-        justifyContent: 'center',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
       }}
     >
+      {!showBookingDashboard && (
+        <GameMetaTopSheet
+          refreshKey={selectedGame?.id ?? null}
+          gameNameOverride={selectedGame?.name ?? null}
+          ticketPriceOverride={selectedGame?.ticket_price ?? null}
+          gameStatusOverride={selectedGame?.status ?? null}
+        />
+      )}
+      <AnnouncementBanner gameId={selectedGame?.id || undefined} enableSound={soundEnabled} />
+      {gameUpdatedBanner && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '14px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 90,
+            width: 'min(640px, calc(100% - 24px))',
+            borderRadius: '10px',
+            border: '1px solid #29b34a',
+            background: 'rgba(11, 66, 24, 0.96)',
+            color: '#eaffef',
+            fontWeight: 700,
+            textAlign: 'center',
+            padding: '10px 12px',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.28)',
+          }}
+        >
+          {gameUpdatedBanner}
+        </div>
+      )}
       <section
         className="lobby-panel"
         style={{
@@ -1214,6 +1337,34 @@ const Lobby = () => {
                   value={bookingPlayerName}
                   onChange={(event) => setBookingPlayerName(event.target.value)}
                   placeholder="Enter your name"
+                  style={{
+                    width: '100%',
+                    borderRadius: '8px',
+                    border: '1px solid #c8c8c8',
+                    fontSize: 'clamp(18px, 2.1vw, 28px)',
+                    padding: '10px 12px',
+                    marginBottom: '10px',
+                    outline: 'none',
+                  }}
+                />
+                <input
+                  value={bookingPlayerPhone}
+                  onChange={(event) => setBookingPlayerPhone(event.target.value)}
+                  placeholder="Enter your WhatsApp number"
+                  style={{
+                    width: '100%',
+                    borderRadius: '8px',
+                    border: '1px solid #c8c8c8',
+                    fontSize: 'clamp(18px, 2.1vw, 28px)',
+                    padding: '10px 12px',
+                    marginBottom: '10px',
+                    outline: 'none',
+                  }}
+                />
+                <input
+                  value={bookingPaymentMode}
+                  onChange={(event) => setBookingPaymentMode(event.target.value)}
+                  placeholder="Payment mode (e.g., Cheque)"
                   style={{
                     width: '100%',
                     borderRadius: '8px',
