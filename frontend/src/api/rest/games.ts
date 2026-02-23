@@ -29,8 +29,8 @@ export const fetchPublicGames = async (): Promise<PublicGame[]> => {
   return response.data
 }
 
-export const fetchCurrentPublicGame = async (): Promise<PublicGame> => {
-  const response = await apiClient.get<PublicGame>('/games/public/current/')
+export const fetchCurrentPublicGame = async (): Promise<PublicGame | null> => {
+  const response = await apiClient.get<PublicGame | null>('/games/public/current/')
   return response.data
 }
 

@@ -1410,7 +1410,7 @@ class LatestPublicGameView(APIView):
         # Backward-compatible alias that now returns the active game.
         game = _get_current_game()
         if game is None:
-            return Response({"detail": "No active game found."}, status=404)
+            return Response(None)
         serializer = PublicGameSerializer(game)
         return Response(serializer.data)
 
@@ -1422,7 +1422,7 @@ class CurrentPublicGameView(APIView):
     def get(self, request):
         game = _get_current_game()
         if game is None:
-            return Response({"detail": "No active game found."}, status=404)
+            return Response(None)
         serializer = PublicGameSerializer(game)
         return Response(serializer.data)
 
@@ -1434,7 +1434,19 @@ class GameMetaView(APIView):
     def get(self, request):
         game = _get_current_game_queryset().select_related("agent").first()
         if game is None:
-            return Response({"detail": "No active game found."}, status=404)
+            payload = {
+                "game_name": "Tambola Game",
+                "ticket_price": 0,
+                "is_live": False,
+                "agent_name": "",
+                "agent_whatsapp": "",
+                "payment_mode": "Manual via WhatsApp",
+                "how_to_play": DEFAULT_HOW_TO_PLAY,
+                "prize_patterns": [],
+                "prize_pattern_details": [],
+            }
+            serializer = GameMetaSerializer(payload)
+            return Response(serializer.data)
 
         game_settings = GameSettings.objects.order_by("-id").first()
         agent_name = ""

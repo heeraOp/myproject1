@@ -11,7 +11,9 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r /tmp/requirements.txt "uvicorn[standard]"
 
 COPY backend/ /app/
+COPY docker/backend-entrypoint.sh /usr/local/bin/backend-entrypoint
+RUN chmod +x /usr/local/bin/backend-entrypoint
 
 EXPOSE 8000
 
-CMD ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8000", "--workers", "3", "--proxy-headers", "--forwarded-allow-ips=*" ]
+CMD ["backend-entrypoint"]

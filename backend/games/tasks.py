@@ -6,6 +6,7 @@ import redis
 from asgiref.sync import async_to_sync
 from celery import shared_task
 from channels.layers import get_channel_layer
+from django.conf import settings
 from django.db import transaction
 
 from claims.utils.evaluator import evaluate_claims_for_game
@@ -32,7 +33,8 @@ def _refresh_lock_ttl(redis_client, lock_key, lock_value, ttl_seconds):
 def auto_call_numbers(game_id):
     lock_value = str(uuid.uuid4())
     lock_key = f"game_auto_call:{game_id}"
-    redis_client = redis.Redis(host="127.0.0.1", port=6379, db=0)
+    redis_url = str(getattr(settings, "REDIS_URL", "redis://127.0.0.1:6379/0")).strip()
+    redis_client = redis.from_url(redis_url)
 
     if not redis_client.set(lock_key, lock_value, nx=True, ex=30):
         return

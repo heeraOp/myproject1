@@ -17,6 +17,9 @@ staticfiles/
 .env.*
 .env.local
 .env.production
+!/.env.example
+!/.env.dev.example
+!/.env.vps.example
 
 # ======================
 # Virtual Environment
@@ -50,3 +53,4 @@ build/
 coverage/
 .cache/
 dump.rdb
+artifacts/

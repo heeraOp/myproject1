@@ -154,14 +154,27 @@ CHANNEL_LAYERS = {
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-if DJANGO_ENV == "production":
+DJANGO_USE_POSTGRES = _env_bool("DJANGO_USE_POSTGRES", DJANGO_ENV == "production")
+
+if DJANGO_USE_POSTGRES:
+    if DJANGO_ENV == "production":
+        db_name = _required_env("POSTGRES_DB")
+        db_user = _required_env("POSTGRES_USER")
+        db_password = _required_env("POSTGRES_PASSWORD")
+        db_host = _required_env("POSTGRES_HOST")
+    else:
+        db_name = str(os.environ.get("POSTGRES_DB", "app_db")).strip() or "app_db"
+        db_user = str(os.environ.get("POSTGRES_USER", "app_user")).strip() or "app_user"
+        db_password = str(os.environ.get("POSTGRES_PASSWORD", "app_password")).strip()
+        db_host = str(os.environ.get("POSTGRES_HOST", "127.0.0.1")).strip() or "127.0.0.1"
+
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": _required_env("POSTGRES_DB"),
-            "USER": _required_env("POSTGRES_USER"),
-            "PASSWORD": _required_env("POSTGRES_PASSWORD"),
-            "HOST": _required_env("POSTGRES_HOST"),
+            "NAME": db_name,
+            "USER": db_user,
+            "PASSWORD": db_password,
+            "HOST": db_host,
             "PORT": os.environ.get("POSTGRES_PORT", "5432"),
         }
     }
@@ -244,8 +257,18 @@ CSRF_TRUSTED_ORIGINS = _split_csv(
     os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", ",".join(CORS_ALLOWED_ORIGINS))
 ) or CORS_ALLOWED_ORIGINS
 
-SESSION_COOKIE_SECURE = _env_bool("DJANGO_SESSION_COOKIE_SECURE", not DEBUG)
-CSRF_COOKIE_SECURE = _env_bool("DJANGO_CSRF_COOKIE_SECURE", not DEBUG)
+FORCE_SECURE_COOKIES = _env_bool("DJANGO_FORCE_SECURE_COOKIES", DJANGO_ENV == "production")
+ENFORCE_HTTPS = _env_bool("DJANGO_ENFORCE_HTTPS", DJANGO_ENV == "production")
+ENABLE_HSTS = _env_bool("DJANGO_ENABLE_HSTS", DJANGO_ENV == "production")
+
+SESSION_COOKIE_SECURE = _env_bool(
+    "DJANGO_SESSION_COOKIE_SECURE",
+    FORCE_SECURE_COOKIES or not DEBUG,
+)
+CSRF_COOKIE_SECURE = _env_bool(
+    "DJANGO_CSRF_COOKIE_SECURE",
+    FORCE_SECURE_COOKIES or not DEBUG,
+)
 SESSION_COOKIE_SAMESITE = _normalize_samesite(
     os.environ.get("DJANGO_SESSION_COOKIE_SAMESITE"),
     "Lax",
@@ -257,8 +280,8 @@ CSRF_COOKIE_SAMESITE = _normalize_samesite(
 SESSION_COOKIE_HTTPONLY = _env_bool("DJANGO_SESSION_COOKIE_HTTPONLY", True)
 CSRF_COOKIE_HTTPONLY = _env_bool("DJANGO_CSRF_COOKIE_HTTPONLY", False)
 
-# Production always requires secure cookies for session-based authentication over HTTPS.
-if DJANGO_ENV == "production":
+# Optionally force secure cookies in any environment.
+if FORCE_SECURE_COOKIES:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
 
@@ -270,24 +293,24 @@ if CSRF_COOKIE_SAMESITE == "None":
 
 USE_X_FORWARDED_HOST = _env_bool("DJANGO_USE_X_FORWARDED_HOST", not DEBUG)
 
-if DEBUG:
-    SECURE_SSL_REDIRECT = False
-    SECURE_HSTS_SECONDS = 0
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
-    SECURE_HSTS_PRELOAD = False
-else:
-    # Force HTTPS
-    SECURE_SSL_REDIRECT = True
-
-    # Required when behind Nginx reverse proxy
+# Allow controlled HTTP-only bootstrap on VPS when HTTPS is not ready yet.
+# Keep these enabled by default in production.
+SECURE_SSL_REDIRECT = ENFORCE_HTTPS
+if ENFORCE_HTTPS:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
-    # HSTS (1 year)
+# HSTS is meaningful only when HTTPS is enforced.
+if ENABLE_HSTS and ENFORCE_HTTPS:
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+else:
+    SECURE_HSTS_SECONDS = 0
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
 
-    # Extra security headers
+# Extra security headers
+if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
 

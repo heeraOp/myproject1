@@ -93,10 +93,22 @@ class GameMetaApiTests(APITestCase):
             len(Prize.PrizeType.choices),
         )
 
-    def test_returns_404_when_no_active_game(self):
+    def test_returns_default_payload_when_no_active_game(self):
         Game.objects.filter(id=self.game.id).update(is_active=False, is_current=False)
         response = self.client.get("/api/game/meta/")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["game_name"], "Tambola Game")
+        self.assertEqual(response.data["ticket_price"], 0)
+        self.assertFalse(response.data["is_live"])
+        self.assertEqual(response.data["agent_name"], "")
+        self.assertEqual(response.data["agent_whatsapp"], "")
+        self.assertEqual(response.data["prize_patterns"], [])
+
+    def test_public_current_game_returns_null_when_no_active_game(self):
+        Game.objects.filter(id=self.game.id).update(is_active=False, is_current=False)
+        response = self.client.get("/api/games/public/current/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data)
 
 
 class GameRecreateApiTests(APITestCase):
