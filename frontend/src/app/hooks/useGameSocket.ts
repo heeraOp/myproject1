@@ -240,13 +240,24 @@ const toInteger = (value: string | number): number | null => {
 const resolveMediaAudioUrl = (value: string): string => {
   const raw = String(value || '').trim()
   if (!raw) return ''
-  if (/^https?:\/\//i.test(raw)) return raw
-  if (raw.startsWith('/')) {
-    const base = normalizeBaseUrl(REST_BASE_URL || '')
-    if (!base) return raw
-    return `${base}${raw}`
+  const runtimeOrigin = typeof window !== 'undefined' ? window.location.origin : ''
+  const configuredBase = normalizeBaseUrl(REST_BASE_URL || '')
+  const base = configuredBase || runtimeOrigin
+
+  try {
+    const resolved = new URL(raw, base || 'http://localhost')
+    if (
+      typeof window !== 'undefined' &&
+      window.location.protocol === 'https:' &&
+      resolved.protocol === 'http:' &&
+      resolved.host === window.location.host
+    ) {
+      resolved.protocol = 'https:'
+    }
+    return resolved.toString()
+  } catch {
+    return raw
   }
-  return raw
 }
 
 export const useGameSocket = (gameId?: string): void => {
@@ -415,7 +426,7 @@ export const useGameSocket = (gameId?: string): void => {
           gameId: normalizedGameId,
           message: event.message,
           timestamp: event.timestamp,
-          audioUrl: typeof event.audio_url === 'string' ? event.audio_url : undefined,
+          audioUrl: typeof event.audio_url === 'string' ? resolveMediaAudioUrl(event.audio_url) : undefined,
           audioMimeType: typeof event.audio_mime_type === 'string' ? event.audio_mime_type : undefined,
         })
       }),

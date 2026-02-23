@@ -52,6 +52,25 @@ const resolveVoiceTypeForAnnouncement = (type: AnnouncementType): VoiceType => {
   return 'normal'
 }
 
+const normalizeAudioUrl = (value: string): string => {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (typeof window === 'undefined') return raw
+  try {
+    const resolved = new URL(raw, window.location.origin)
+    if (
+      window.location.protocol === 'https:' &&
+      resolved.protocol === 'http:' &&
+      resolved.host === window.location.host
+    ) {
+      resolved.protocol = 'https:'
+    }
+    return resolved.toString()
+  } catch {
+    return raw
+  }
+}
+
 const AnnouncementBanner = ({
   gameId,
   autoHideMs = 4000,
@@ -81,7 +100,7 @@ const AnnouncementBanner = ({
   const rawAnnouncementMessage = latestAnnouncement?.message ?? ''
   const voiceAnnouncement = isVoiceAnnouncement(rawAnnouncementMessage)
   const messageWithoutVoicePrefix = stripVoiceAnnouncementPrefix(rawAnnouncementMessage)
-  const announcementAudioUrl = String(latestAnnouncement?.audioUrl ?? '').trim()
+  const announcementAudioUrl = normalizeAudioUrl(String(latestAnnouncement?.audioUrl ?? ''))
   const hasAnnouncementAudioClip = announcementAudioUrl.length > 0
   const announcementType = detectTypeFromMessage(
     messageWithoutVoicePrefix,

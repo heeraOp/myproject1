@@ -4,6 +4,7 @@ export {
   playMusic,
   stopMusic,
   playEffect,
+  playWinnerCue,
   playWinnerSoundFlow,
   queueSpeakText,
   isWinnerSoundFlowActive,

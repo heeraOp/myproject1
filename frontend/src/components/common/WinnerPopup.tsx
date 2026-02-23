@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import confetti from 'canvas-confetti'
-import { playAudioElementSafely } from '@/utils/audioEngine'
+import { playWinnerCue } from '@/utils/speakText'
 import './WinnerPopup.css'
 
 type WinnerPopupProps = {
@@ -33,15 +33,6 @@ const toPrizeLabel = (value: string): string => {
 }
 
 const WinnerPopup = ({ visible, winnerName, prizeType, enableSound = true }: WinnerPopupProps) => {
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-
-  useEffect(() => {
-    if (!audioRef.current) {
-      audioRef.current = new Audio('/sounds/winner.mp3')
-      audioRef.current.preload = 'auto'
-    }
-  }, [])
-
   useEffect(() => {
     if (!visible) return
 
@@ -53,10 +44,8 @@ const WinnerPopup = ({ visible, winnerName, prizeType, enableSound = true }: Win
       colors: ['#ff2d2d', '#ffd54f', '#ffffff', '#35d76f'],
     })
 
-    if (enableSound && audioRef.current) {
-      audioRef.current.pause()
-      audioRef.current.currentTime = 0
-      void playAudioElementSafely(audioRef.current)
+    if (enableSound) {
+      void playWinnerCue()
     }
   }, [enableSound, visible, winnerName, prizeType])
 

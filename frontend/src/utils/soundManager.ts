@@ -52,6 +52,7 @@ const buildVoiceUrl = (text: string, voiceType: VoiceType): string => {
 
 const clampVolume = (value: number): number => Math.max(0, Math.min(1, value))
 const clampRate = (value: number): number => Math.max(0.8, Math.min(1.55, value))
+const clampPitch = (value: number): number => Math.max(0.5, Math.min(2, value))
 
 const resolveAudioPlaybackRate = (style: SpeechPlaybackStyle = {}): number => {
   const rate = Number(style.rate)
@@ -220,6 +221,82 @@ const playApplauseFallback = async (durationMs = 1300): Promise<boolean> => {
   return true
 }
 
+const canUseSpeechSynthesis = (): boolean =>
+  typeof window !== 'undefined' &&
+  typeof window.speechSynthesis !== 'undefined' &&
+  typeof SpeechSynthesisUtterance !== 'undefined'
+
+const selectSpeechSynthesisVoice = (voiceType: VoiceType): SpeechSynthesisVoice | null => {
+  if (!canUseSpeechSynthesis()) return null
+  const voices = window.speechSynthesis.getVoices()
+  if (!voices.length) return null
+
+  const englishVoices = voices.filter((voice) => /^en([-_]|$)/i.test(String(voice.lang || '')))
+  const candidates = englishVoices.length ? englishVoices : voices
+  if (voiceType === 'female_shout') {
+    const femaleCandidate = candidates.find((voice) =>
+      /female|zira|samantha|karen|veena|aria/i.test(`${voice.name} ${voice.voiceURI}`),
+    )
+    if (femaleCandidate) return femaleCandidate
+  }
+
+  return candidates[0] ?? null
+}
+
+const speakTextWithBrowserSynthesis = (
+  text: string,
+  voiceType: VoiceType,
+  style: SpeechPlaybackStyle,
+  controller: AbortController,
+): Promise<boolean> => {
+  if (!canUseSpeechSynthesis()) return Promise.resolve(false)
+  if (controller.signal.aborted) return Promise.resolve(false)
+
+  return new Promise((resolve) => {
+    const synth = window.speechSynthesis
+    const utterance = new SpeechSynthesisUtterance(text)
+    let settled = false
+
+    const finalize = (result: boolean) => {
+      if (settled) return
+      settled = true
+      controller.signal.removeEventListener('abort', onAbort)
+      resolve(result)
+    }
+
+    const onAbort = () => {
+      try {
+        synth.cancel()
+      } catch {
+        // ignore
+      }
+      finalize(false)
+    }
+
+    const rate = resolveAudioPlaybackRate(style)
+    const pitchValue = Number(style.pitch)
+    utterance.rate = rate
+    utterance.pitch = Number.isFinite(pitchValue) ? clampPitch(pitchValue) : 1
+
+    const selectedVoice = selectSpeechSynthesisVoice(voiceType)
+    if (selectedVoice) {
+      utterance.voice = selectedVoice
+      utterance.lang = selectedVoice.lang
+    }
+
+    utterance.onend = () => finalize(true)
+    utterance.onerror = () => finalize(false)
+    controller.signal.addEventListener('abort', onAbort, { once: true })
+
+    try {
+      synth.cancel()
+      synth.speak(utterance)
+    } catch {
+      finalize(false)
+    }
+  })
+}
+
 export const stopSpeaking = () => {
   if (speechRequestController) {
     speechRequestController.abort()
@@ -229,6 +306,13 @@ export const stopSpeaking = () => {
     speechAudio.pause()
     speechAudio.currentTime = 0
     speechAudio = null
+  }
+  if (canUseSpeechSynthesis()) {
+    try {
+      window.speechSynthesis.cancel()
+    } catch {
+      // ignore
+    }
   }
   clearSpeechObjectUrl()
 }
@@ -255,10 +339,14 @@ export const speakText = async (
       credentials: 'include',
       signal: controller.signal,
     })
-    if (!response.ok) return false
+    if (!response.ok) {
+      return speakTextWithBrowserSynthesis(text, voiceType, style, controller)
+    }
 
     const blob = await response.blob()
-    if (!blob.size || speechRequestController !== controller) return false
+    if (!blob.size || speechRequestController !== controller) {
+      return speakTextWithBrowserSynthesis(text, voiceType, style, controller)
+    }
 
     const objectUrl = URL.createObjectURL(blob)
     speechObjectUrl = objectUrl
@@ -280,11 +368,12 @@ export const speakText = async (
     const played = await playAudioElementSafely(audio)
     if (!played) {
       finalize()
-      return false
+      return speakTextWithBrowserSynthesis(text, voiceType, style, controller)
     }
     return true
   } catch {
-    return false
+    if (controller.signal.aborted) return false
+    return speakTextWithBrowserSynthesis(text, voiceType, style, controller)
   } finally {
     if (speechRequestController === controller) {
       speechRequestController = null
@@ -400,6 +489,13 @@ export const playEffect = async (
     }
     return false
   }
+}
+
+export const playWinnerCue = async (): Promise<boolean> => {
+  if (typeof window === 'undefined') return false
+  const played = await playEffect('/sounds/winner.mp3', { volume: 1, interrupt: true })
+  if (played) return true
+  return playApplauseFallback(900)
 }
 
 export const playWinnerSoundFlow = (

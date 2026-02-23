@@ -56,6 +56,7 @@ Edit `.env`:
 - `DJANGO_CORS_ALLOWED_ORIGINS`: set your HTTPS frontend origin(s).
 - `DJANGO_CSRF_TRUSTED_ORIGINS`: set same HTTPS origin(s).
 - `NGINX_PORT`: usually `80`.
+- `ELEVEN_API_KEY`: optional but recommended for premium voice output.
 
 ## 5. Start Production Stack
 

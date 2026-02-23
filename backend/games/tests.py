@@ -255,7 +255,7 @@ class GameAnnouncementApiTests(APITestCase):
         self.assertEqual(response.data["message"], "Voice announcement")
         self.assertEqual(response.data["audio_mime_type"], "audio/webm")
         audio_url = str(response.data["audio_url"] or "")
-        self.assertTrue(audio_url.startswith("http://testserver/api/games/"))
+        self.assertTrue(audio_url.startswith("/api/games/"))
 
         announcement = Announcement.objects.get(id=response.data["announcement_id"])
         self.assertTrue(bool(announcement.audio_file))

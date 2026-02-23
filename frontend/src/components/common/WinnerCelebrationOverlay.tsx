@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef } from 'react'
 import confetti from 'canvas-confetti'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useGameStore } from '@/app/store/game.store'
-import { initGlobalAudioUnlock, playAudioElementSafely } from '@/utils/audioEngine'
+import { initGlobalAudioUnlock } from '@/utils/audioEngine'
+import { playWinnerCue } from '@/utils/speakText'
 import './WinnerCelebrationOverlay.css'
 
 const AUTO_DISMISS_MS = 3000
@@ -67,7 +68,6 @@ const WinnerCelebrationOverlay = () => {
   const activeWinner = useGameStore((state) => state.winnerQueue[0] ?? null)
   const dismissWinnerAnnouncement = useGameStore((state) => state.dismissWinnerAnnouncement)
   const timeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const prizeLabel = useMemo(
     () => toReadablePrizeName(activeWinner?.prize_name ?? ''),
@@ -76,10 +76,6 @@ const WinnerCelebrationOverlay = () => {
 
   useEffect(() => {
     initGlobalAudioUnlock()
-    if (!audioRef.current) {
-      audioRef.current = new Audio('/sounds/winner.mp3')
-      audioRef.current.preload = 'auto'
-    }
   }, [])
 
   useEffect(() => {
@@ -93,11 +89,7 @@ const WinnerCelebrationOverlay = () => {
       dismissWinnerAnnouncement()
     }, AUTO_DISMISS_MS)
 
-    if (audioRef.current) {
-      audioRef.current.pause()
-      audioRef.current.currentTime = 0
-      void playAudioElementSafely(audioRef.current)
-    }
+    void playWinnerCue()
   }, [activeWinner?.id, activeWinner, dismissWinnerAnnouncement])
 
   useEffect(() => {
@@ -105,10 +97,6 @@ const WinnerCelebrationOverlay = () => {
       if (timeoutRef.current) {
         window.clearTimeout(timeoutRef.current)
         timeoutRef.current = null
-      }
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current.currentTime = 0
       }
     }
   }, [])

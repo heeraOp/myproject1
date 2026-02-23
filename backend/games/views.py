@@ -179,11 +179,10 @@ def _resolve_announcement_audio_path(relative_path: str):
 def _announcement_audio_url(*, request, game_id, announcement_id, audio_file):
     if not audio_file:
         return None
-    url = reverse(
+    return reverse(
         "game-announcement-audio",
         kwargs={"game_id": game_id, "announcement_id": announcement_id},
     )
-    return request.build_absolute_uri(url)
 
 
 def _configured_status():
